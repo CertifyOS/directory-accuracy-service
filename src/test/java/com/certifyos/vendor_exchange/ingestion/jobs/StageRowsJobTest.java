@@ -35,11 +35,7 @@ class StageRowsJobTest {
 
         Assertions.assertTrue(deferred.getMessage().contains("disabled"), deferred.getMessage());
         Mockito.verify(support, Mockito.never())
-                .loadExpecting(
-                        ArgumentMatchers.any(),
-                        ArgumentMatchers.any(),
-                        ArgumentMatchers.anyInt(),
-                        ArgumentMatchers.any());
+                .loadExpecting(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
         Mockito.verifyNoInteractions(fileIngestion, stager);
     }
 }

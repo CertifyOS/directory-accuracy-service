@@ -32,7 +32,9 @@ import org.jboss.logging.Logger;
  * unverified field. Recommendations with one id collapse to the first row's: a practitioner's
  * practitioner-level fields across its location rows, and a location row repeated in the file. A
  * later practitioner-level cell whose vendor value differs from the kept one adds one disagreement
- * and one log line naming the field and the two rows, never the values.
+ * and one log line naming the field and the two rows, never the values. Disagreements are counted
+ * within one chunk: a practitioner whose location rows straddle a chunk boundary is compared only
+ * among the rows of each chunk, so {@code practitionerFieldDisagreements} is a lower bound.
  */
 public final class ChunkBuilder {
 

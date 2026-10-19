@@ -106,4 +106,21 @@ class WideRowTest {
         Assertions.assertFalse(missing.isPractitioner());
         Assertions.assertNull(missing.entityType());
     }
+
+    @Test
+    void entityTypeIsReadInAnyCaseAndTrimmed() {
+        for (String echoed : new String[] {"practitioner", "Practitioner", " PRACTITIONER "}) {
+            WideRow row = WideRow.from(DesignRows.row("VALID", Map.of("entity_type", DesignRows.valid(echoed))));
+
+            Assertions.assertTrue(row.isPractitioner(), "the export sends practitioner; a vendor may echo " + echoed);
+        }
+    }
+
+    @Test
+    void vendorStatusIsUpperCased() {
+        String column = CandorRecsMapping.column("phone", CandorRecsMapping.Suffix.STATUS);
+        WideRow row = WideRow.from(DesignRows.row("VALID", Map.of(column, DesignRows.valid(" Invalid "))));
+
+        Assertions.assertEquals("INVALID", row.cells().get("phone").vendorStatus());
+    }
 }
