@@ -10,6 +10,7 @@ import com.certifyos.vendor_exchange.export.batch.ExportBatch;
 import com.certifyos.vendor_exchange.http.ProblemException;
 import com.certifyos.vendor_exchange.ingestion.events.ArrivalEvent;
 import com.certifyos.vendor_exchange.ingestion.events.IngestionRequests;
+import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle.Outcome;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
 import com.certifyos.vendor_exchange.persistence.Transactions;
@@ -146,11 +147,11 @@ public class UnmatchedOperations {
                     "batch " + batch.id() + " is " + batch.state() + "; only a delivered batch takes an upload");
         }
         String why = requireReason(reason);
-        // The claim filter checks only the target batch, and the upload id index is not unique: an
-        // upload a later delivery claimed on its named batch would otherwise sit on two batches.
+        // The friendly early answer, naming the batch; the unique upload index refuses the claim in
+        // the transaction too, for a delivery that lands between this read and the commit.
         requests.claimed(uploadId).ifPresent(located -> {
             throw ProblemException.conflict(
-                    "ALREADY_CLAIMED",
+                    InboundClaims.ALREADY_CLAIMED,
                     "upload " + uploadId + " is already on batch "
                             + located.batch().id());
         });
@@ -172,7 +173,7 @@ public class UnmatchedOperations {
                 audit.write(session, attached);
                 return claimed;
             });
-        } catch (IllegalStateException exception) {
+        } catch (BatchMovedException exception) {
             throw ProblemException.conflict(
                     "ATTACH_NOT_ALLOWED", "batch " + batch.id() + " changed under this request");
         }
@@ -183,10 +184,23 @@ public class UnmatchedOperations {
                 // the upload was on the batch already: nothing was claimed, nothing to count
             }
         }
-        IngestionRequests.Requested requested = requests.requestIfUnowned(uploadId, now);
-        InboundFileState state = requested.located().entry().state();
+        Located located = requests.claimed(uploadId)
+                .orElseThrow(() -> new IllegalStateException("upload " + uploadId + " is attached but not found"));
+        InboundFileState state = located.entry().state();
         LOG.infof("upload %s attached to %s by an operator: %s, entry %s", uploadId, batch.id(), outcome, state);
-        return new Attached(uploadId, state, requested.jobId());
+        UUID jobId = null;
+        try {
+            jobId = requests.requestIfUnowned(located, now);
+        } catch (RuntimeException exception) {
+            // The attach committed; a 500 would invite a retry that answers ALREADY_RESOLVED. The
+            // entry stays RECEIVED with no job, which the reconciler re-enqueues (findStale).
+            LOG.errorf(
+                    exception,
+                    "upload %s attached to %s but the request-ingestion enqueue failed; left for the reconciler",
+                    uploadId,
+                    batch.id());
+        }
+        return new Attached(uploadId, state, jobId);
     }
 
     /**

@@ -151,7 +151,7 @@ public class InboundFileRepository {
 
     /**
      * The entry for an upload id, for the storage event handler and operator reads, on the
-     * {@code batches_inbound_upload_id} index.
+     * {@code batches_inbound_upload_id_unique} index.
      *
      * @param uploadId {@code <bucket>|<objectName>|<generation>}
      * @return the entry and its batch, if any
@@ -294,7 +294,7 @@ public class InboundFileRepository {
 
     /**
      * The pipeline {@link #countByState} runs, shared with the test that explains it. The first stage
-     * reads only batches with an entry, on {@code batches_inbound_upload_id}.
+     * reads only batches with an entry, on {@code batches_inbound_upload_id_unique}.
      */
     static List<Bson> countPipeline() {
         return List.of(

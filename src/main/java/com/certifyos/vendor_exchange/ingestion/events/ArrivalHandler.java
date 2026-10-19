@@ -5,6 +5,8 @@ import com.certifyos.vendor_exchange.export.batch.BatchState;
 import com.certifyos.vendor_exchange.export.batch.ExportBatch;
 import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
+import com.certifyos.vendor_exchange.http.ProblemException;
+import com.certifyos.vendor_exchange.ingestion.inbound.InboundClaims;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
@@ -79,7 +81,7 @@ public class ArrivalHandler {
         IGNORED_PREFIX,
         /** Recorded in {@code vendor_unmatched_uploads} with a reason. */
         UNMATCHED,
-        /** The upload was already on its batch (a redelivered event). */
+        /** The upload was already on a batch: its own (a redelivered event) or another an operator attached it to. */
         ALREADY_CLAIMED,
         /** The batch's first upload, claimed and handed to the request-ingestion job. */
         RECEIVED,
@@ -144,7 +146,18 @@ public class ArrivalHandler {
     }
 
     private Outcome claim(ExportBatch batch, InboundFile entry, Instant now) {
-        InboundLifecycle.Outcome claimed = lifecycle.received(batch, entry, now);
+        InboundLifecycle.Outcome claimed;
+        try {
+            claimed = lifecycle.received(batch, entry, now);
+        } catch (ProblemException exception) {
+            if (!InboundClaims.isAlreadyClaimed(exception)) {
+                throw exception;
+            }
+            // The upload sits on another batch (an operator attached it there first): the unique
+            // upload index refused the claim and nothing was written. Acknowledged.
+            LOG.infof("%s upload %s is already on another batch; not claimed", batch.id(), entry.uploadId());
+            return Outcome.ALREADY_CLAIMED;
+        }
         return switch (claimed) {
             case RECEIVED -> {
                 requestIngestion(entry.uploadId(), now);

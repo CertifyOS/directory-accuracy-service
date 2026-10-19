@@ -62,17 +62,29 @@ public class IngestionRequests {
      * @throws IllegalStateException when the upload is on no batch
      */
     public Requested requestIfUnowned(String uploadId, Instant now) {
-        Located located = inbound.findByUploadId(uploadId)
+        Located located = claimed(uploadId)
                 .orElseThrow(() -> new IllegalStateException("upload " + uploadId + " is claimed but not found"));
+        return new Requested(located, requestIfUnowned(located, now));
+    }
+
+    /**
+     * Enqueues the request-ingestion job for an entry the caller has read, when it is {@code
+     * RECEIVED} with no job, then records the job id.
+     *
+     * @param located the entry as the caller read it
+     * @param now the time of the job id write
+     * @return the job enqueued, or null when the entry needed none
+     */
+    public UUID requestIfUnowned(Located located, Instant now) {
         InboundFile entry = located.entry();
         if (entry.state() != InboundFileState.RECEIVED || entry.jobId() != null) {
             LOG.infof(
                     "%s upload %s is %s with job %s; nothing to enqueue",
-                    located.batch().id(), uploadId, entry.state(), entry.jobId());
-            return new Requested(located, null);
+                    located.batch().id(), entry.uploadId(), entry.state(), entry.jobId());
+            return null;
         }
-        UUID jobId = enqueuer.requestIngestion(located.batch().id(), uploadId, entry.attempt());
+        UUID jobId = enqueuer.requestIngestion(located.batch().id(), entry.uploadId(), entry.attempt());
         lifecycle.jobRecorded(located, jobId, now);
-        return new Requested(located, jobId);
+        return jobId;
     }
 }

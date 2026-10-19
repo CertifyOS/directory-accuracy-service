@@ -5,8 +5,11 @@ import com.certifyos.vendor_exchange.audit.AuditRepository;
 import com.certifyos.vendor_exchange.export.batch.BatchState;
 import com.certifyos.vendor_exchange.export.batch.ExportBatch;
 import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
+import com.certifyos.vendor_exchange.http.ProblemException;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Claim;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle.Outcome;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,6 +25,9 @@ import org.bson.conversions.Bson;
  */
 @ApplicationScoped
 public class InboundClaims {
+
+    /** The problem code for an upload that already sits on a batch. */
+    public static final String ALREADY_CLAIMED = "ALREADY_CLAIMED";
 
     private final InboundFileRepository inbound;
     private final ExportBatchRepository batches;
@@ -39,7 +45,17 @@ public class InboundClaims {
             throw new IllegalArgumentException(
                     batch.id() + " is " + batch.state() + "; only a delivered batch takes an upload");
         }
-        Claim claim = inbound.claim(session, batch.id(), entry);
+        Claim claim;
+        try {
+            claim = inbound.claim(session, batch.id(), entry);
+        } catch (MongoWriteException exception) {
+            if (exception.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                throw exception;
+            }
+            // batches_inbound_upload_id_unique: the upload sits on another batch. The server has
+            // aborted the transaction already; the caller's rolls back with this exception.
+            throw alreadyClaimed(entry.uploadId());
+        }
         if (!claim.claimed()) {
             return Outcome.ALREADY_CLAIMED;
         }
@@ -51,12 +67,33 @@ public class InboundClaims {
         return Outcome.DUPLICATE_LOGGED;
     }
 
+    /**
+     * The refusal of an upload that already sits on a batch: 409 {@value #ALREADY_CLAIMED}, naming
+     * only the upload.
+     *
+     * @param uploadId the upload
+     * @return the exception to throw
+     */
+    public static ProblemException alreadyClaimed(String uploadId) {
+        return ProblemException.conflict(ALREADY_CLAIMED, "upload " + uploadId + " is already on a batch");
+    }
+
+    /**
+     * Whether a refusal is {@link #alreadyClaimed}.
+     *
+     * @param exception the refusal
+     * @return true for 409 {@value #ALREADY_CLAIMED}
+     */
+    public static boolean isAlreadyClaimed(ProblemException exception) {
+        return ALREADY_CLAIMED.equals(exception.code());
+    }
+
     private void acknowledge(ClientSession session, ExportBatch batch, InboundFile entry, String actor, Instant now) {
         Instant acknowledgedAt = entry.eventTime() == null ? now : entry.eventTime();
         Bson updates = Updates.combine(
                 Updates.set("acknowledgedAt", acknowledgedAt), Updates.set("inboundBatchId", entry.uploadId()));
         if (!batches.updateInState(session, batch.id(), batch.state(), now, updates)) {
-            throw new IllegalStateException(
+            throw new BatchMovedException(
                     batch.id() + " is no longer " + batch.state() + "; acknowledgement not written");
         }
         audit.write(

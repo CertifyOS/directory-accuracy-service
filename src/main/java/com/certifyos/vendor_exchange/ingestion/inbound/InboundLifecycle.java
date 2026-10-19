@@ -84,8 +84,11 @@ public class InboundLifecycle {
      * @param now the time of the write
      * @return what happened
      * @throws IllegalArgumentException when the batch is in another state
-     * @throws IllegalStateException when the batch left the state read before the acknowledgement;
-     *     the transaction rolled back and the claim with it, so a redelivery starts over
+     * @throws IllegalStateException when the batch left the state read before the acknowledgement
+     *     ({@link BatchMovedException}); the transaction rolled back and the claim with it, so a
+     *     redelivery starts over
+     * @throws com.certifyos.vendor_exchange.http.ProblemException 409 {@code ALREADY_CLAIMED} when
+     *     the upload sits on another batch; nothing was written
      */
     public Outcome received(ExportBatch batch, InboundFile entry, Instant now) {
         Outcome outcome = transactions.run(session -> claimIn(session, batch, entry, Actors.INGESTION, now));
@@ -116,8 +119,11 @@ public class InboundLifecycle {
      * @param now the time of the write
      * @return what happened
      * @throws IllegalArgumentException when the batch is in another state
-     * @throws IllegalStateException when the batch left the state read before the acknowledgement;
-     *     the caller's transaction must roll back
+     * @throws IllegalStateException when the batch left the state read before the acknowledgement
+     *     ({@link BatchMovedException}); the caller's transaction must roll back
+     * @throws com.certifyos.vendor_exchange.http.ProblemException 409 {@code ALREADY_CLAIMED} when
+     *     the unique upload index finds the upload on another batch; the server aborted the
+     *     transaction
      */
     public Outcome claimIn(ClientSession session, ExportBatch batch, InboundFile entry, String actor, Instant now) {
         return claims.claimIn(session, batch, entry, actor, now);

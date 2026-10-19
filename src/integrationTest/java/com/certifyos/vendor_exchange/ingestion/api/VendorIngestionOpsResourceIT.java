@@ -12,17 +12,20 @@ import com.certifyos.vendor_exchange.export.batch.BatchState;
 import com.certifyos.vendor_exchange.export.batch.ExportBatch;
 import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
 import com.certifyos.vendor_exchange.export.batch.ExportNpiRepository;
+import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
 import com.certifyos.vendor_exchange.export.jobs.EgressFixtures;
 import com.certifyos.vendor_exchange.export.jobs.JobIds;
 import com.certifyos.vendor_exchange.http.Problem;
 import com.certifyos.vendor_exchange.ingestion.InboundFixtures;
 import com.certifyos.vendor_exchange.ingestion.events.ArrivalEvent;
+import com.certifyos.vendor_exchange.ingestion.events.ArrivalHandler;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedUpload;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedUploadRepository;
+import com.certifyos.vendor_exchange.ingestion.jobs.IngestionJobEnqueuer;
 import com.certifyos.vendor_exchange.ingestion.jobs.RequestIngestionJob;
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Transactions;
@@ -30,6 +33,7 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.common.QuarkusTestResource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.quarkus.test.security.TestSecurity;
@@ -40,6 +44,7 @@ import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -93,6 +98,9 @@ class VendorIngestionOpsResourceIT {
 
     @Inject
     StorageProvider storage;
+
+    @Inject
+    ArrivalHandler handler;
 
     @InjectMock
     GoogleIdTokenService google;
@@ -310,6 +318,114 @@ class VendorIngestionOpsResourceIT {
                 audit.trailForBatch(second.id(), 100).stream()
                         .noneMatch(written -> written.type() == AuditEventType.INBOUND_UPLOAD_ATTACHED),
                 "no attach event");
+    }
+
+    /**
+     * Attach first, then the storage event for the same upload arrives with its named batch
+     * delivered: the unique upload index refuses the second claim, the handler acknowledges with
+     * {@code ALREADY_CLAIMED}, and the upload stays on the batch the operator chose.
+     */
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
+    void redeliveryAfterAnAttachIsRefusedByTheUniqueIndex() {
+        ExportBatch named = deliveredBatch(TENANT, "named");
+        ExportBatch chosen = deliveredBatch(TENANT, "chosen");
+        UnmatchedUpload row = insert(parsedRow(TENANT, named.id()));
+        member().pathParam("uploadId", row.id())
+                .body(Map.of("exportBatchId", chosen.id(), "reason", "operator chose the newer batch"))
+                .post(ATTACH)
+                .then()
+                .statusCode(202)
+                .body("state", Matchers.equalTo("RECEIVED"));
+
+        Map<String, String> attributes = new HashMap<>();
+        attributes.put("bucketId", InboundFixtures.VENDOR_BUCKET);
+        attributes.put(
+                "objectId",
+                row.id().substring(row.id().indexOf('|') + 1, row.id().lastIndexOf('|')));
+        attributes.put("objectGeneration", row.id().substring(row.id().lastIndexOf('|') + 1));
+        attributes.put("eventType", "OBJECT_FINALIZE");
+        attributes.put("eventTime", row.receivedAt().toString());
+        ArrivalHandler.Outcome outcome = handler.handle(new PubSubPushMessage.Message(
+                null, "m-redelivery", Instant.now().toString(), attributes));
+
+        Assertions.assertEquals(ArrivalHandler.Outcome.ALREADY_CLAIMED, outcome, "acknowledged, not thrown");
+        Assertions.assertTrue(inbound.entriesFor(named.id()).isEmpty(), "no second entry on the named batch");
+        List<InboundFile> onChosen = inbound.entriesFor(chosen.id());
+        Assertions.assertEquals(1, onChosen.size());
+        Assertions.assertEquals(row.id(), onChosen.get(0).uploadId());
+        Assertions.assertNull(batches.find(named.id()).orElseThrow().acknowledgedAt(), "the named batch is untouched");
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
+    void attachWhoseEnqueueFailsAnswers202WithNoJob() {
+        IngestionJobEnqueuer failing = Mockito.mock(IngestionJobEnqueuer.class);
+        Mockito.when(failing.requestIngestion(Mockito.anyString(), Mockito.anyString(), Mockito.anyInt()))
+                .thenThrow(new IllegalStateException("job storage unavailable"));
+        QuarkusMock.installMockForType(failing, IngestionJobEnqueuer.class);
+        ExportBatch batch = deliveredBatch(TENANT, "enqfail");
+        UnmatchedUpload row = insert(parsedRow(TENANT, TENANT + "-enqfail-2026-10-001"));
+
+        member().pathParam("uploadId", row.id())
+                .body(Map.of("exportBatchId", batch.id(), "reason", "vendor typed the batch ref wrong"))
+                .post(ATTACH)
+                .then()
+                .statusCode(202)
+                .body("state", Matchers.equalTo("RECEIVED"))
+                .body("jobId", Matchers.nullValue());
+
+        Assertions.assertEquals(
+                UnmatchedUpload.ATTACHED,
+                unmatched.find(row.id()).orElseThrow().resolution().kind());
+        InboundFile entry = inbound.findByUploadId(row.id()).orElseThrow().entry();
+        Assertions.assertEquals(InboundFileState.RECEIVED, entry.state());
+        Assertions.assertNull(entry.jobId(), "left for the reconciler");
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
+    void attachOntoABatchWithAnUploadIsDuplicateLogged() {
+        ExportBatch batch = deliveredBatch(TENANT, "dup");
+        InboundFile first = InboundFixtures.entryIn(InboundFileState.RECEIVED, TENANT, batch.id());
+        collections
+                .batches()
+                .updateOne(Filters.eq("_id", batch.id()), Updates.push("inboundFiles", first.toDocument()));
+        UnmatchedUpload row = insert(parsedRow(TENANT, TENANT + "-dup-2026-10-001"));
+
+        member().pathParam("uploadId", row.id())
+                .body(Map.of("exportBatchId", batch.id(), "reason", "a second file for the batch"))
+                .post(ATTACH)
+                .then()
+                .statusCode(202)
+                .body("uploadId", Matchers.equalTo(row.id()))
+                .body("state", Matchers.equalTo("DUPLICATE_LOGGED"))
+                .body("jobId", Matchers.nullValue());
+
+        Assertions.assertEquals(2, inbound.entriesFor(batch.id()).size());
+        Assertions.assertEquals(
+                UnmatchedUpload.ATTACHED,
+                unmatched.find(row.id()).orElseThrow().resolution().kind());
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
+    void attachWithoutABatchIdIs400() {
+        UnmatchedUpload row = insert(parsedRow(TENANT, TENANT + "-nobatch-2026-10-001"));
+
+        member().pathParam("uploadId", row.id())
+                .body(Map.of("reason", "forgot the batch"))
+                .post(ATTACH)
+                .then()
+                .statusCode(400)
+                .contentType(Problem.MEDIA_TYPE)
+                .body("code", Matchers.equalTo("INVALID_REQUEST"));
+
+        Assertions.assertNull(unmatched.find(row.id()).orElseThrow().resolution(), "the row stays open");
     }
 
     @Test
