@@ -108,10 +108,15 @@ public class MongoIndexesIT {
         Assertions.assertEquals(
                 new Document("inboundFiles.externalRef", new Document("$exists", true)),
                 batches.get("batches_inbound_external_ref").get("partialFilterExpression", Document.class));
-        assertKey(batches, "batches_inbound_upload_id", new Document("inboundFiles.uploadId", 1));
+        assertKey(batches, "batches_inbound_upload_id_unique", new Document("inboundFiles.uploadId", 1));
         Assertions.assertEquals(
                 new Document("inboundFiles.uploadId", new Document("$exists", true)),
-                batches.get("batches_inbound_upload_id").get("partialFilterExpression", Document.class));
+                batches.get("batches_inbound_upload_id_unique").get("partialFilterExpression", Document.class));
+        Assertions.assertEquals(
+                Boolean.TRUE,
+                batches.get("batches_inbound_upload_id_unique").getBoolean("unique"),
+                "one upload lives on one batch");
+        Assertions.assertFalse(batches.containsKey("batches_inbound_upload_id"), "the non-unique index is gone");
 
         Map<String, Document> recommendations = byName(collections.fieldRecommendations());
         Document openStates = new Document("reviewStatus", new Document("$in", List.of("PENDING", "SKIPPED")));
