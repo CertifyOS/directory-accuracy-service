@@ -25,6 +25,8 @@ class VendorExchangeConfigTest {
         values.put("vendor-exchange.dal.url", "https://dal.example");
         values.put("vendor-exchange.dal.iap-client-id", "dal-client");
         values.put("vendor-exchange.api-layer.url", "https://api.example");
+        values.put("vendor-exchange.ingestion.archive-bucket", "archive-bucket");
+        values.put("vendor-exchange.file-ingestion.url", "https://file-ingestion.example");
         return values;
     }
 
@@ -118,5 +120,60 @@ class VendorExchangeConfigTest {
         values.put("vendor-exchange.role", "api");
 
         Assertions.assertThrows(ConfigValidationException.class, () -> load(values));
+    }
+
+    @Test
+    void ingestionDefaultsMatchTheDesign() {
+        VendorExchangeConfig cfg = load(required());
+
+        Assertions.assertEquals("archive-bucket", cfg.ingestion().archiveBucket());
+        Assertions.assertEquals(6, cfg.ingestion().ingestionDeadlineHours());
+        Assertions.assertEquals(500, cfg.ingestion().stageChunkRows());
+        Assertions.assertEquals(200, cfg.ingestion().reviewPageLimitMax());
+        Assertions.assertEquals(12, cfg.ingestion().rejectedValueTtlMonths());
+        Assertions.assertEquals(30, cfg.ingestion().releaseReadBackDeadlineMinutes());
+        Assertions.assertEquals(5000, cfg.ingestion().releaseBulkMax());
+        Assertions.assertEquals(30, cfg.ingestion().inboundStaleMinutes());
+        Assertions.assertEquals("DATA_FILE", cfg.ingestion().completenessSignal());
+        Assertions.assertEquals(
+                "https://file-ingestion.example", cfg.fileIngestion().url());
+        Assertions.assertEquals("vendor-ingestion", cfg.fileIngestion().consumerIdentifier());
+        Assertions.assertTrue(cfg.fileIngestion().mappingId().isEmpty());
+        Assertions.assertTrue(cfg.fileIngestion().iapAudience().isEmpty());
+    }
+
+    @Test
+    void archiveBucketIsRequired() {
+        Map<String, String> values = required();
+        values.remove("vendor-exchange.ingestion.archive-bucket");
+
+        ConfigValidationException refused =
+                Assertions.assertThrows(ConfigValidationException.class, () -> load(values));
+
+        Assertions.assertTrue(refused.getMessage().contains("vendor-exchange.ingestion.archive-bucket"));
+    }
+
+    @Test
+    void fileIngestionUrlIsRequired() {
+        Map<String, String> values = required();
+        values.remove("vendor-exchange.file-ingestion.url");
+
+        ConfigValidationException refused =
+                Assertions.assertThrows(ConfigValidationException.class, () -> load(values));
+
+        Assertions.assertTrue(refused.getMessage().contains("vendor-exchange.file-ingestion.url"));
+    }
+
+    @Test
+    void fileIngestionSwapInKeysAreReadWhenSet() {
+        Map<String, String> values = required();
+        values.put("vendor-exchange.file-ingestion.mapping-id", "map-1");
+        values.put("vendor-exchange.file-ingestion.iap-audience", "/projects/1/global/backendServices/3");
+        VendorExchangeConfig cfg = load(values);
+
+        Assertions.assertEquals("map-1", cfg.fileIngestion().mappingId().orElseThrow());
+        Assertions.assertEquals(
+                "/projects/1/global/backendServices/3",
+                cfg.fileIngestion().iapAudience().orElseThrow());
     }
 }

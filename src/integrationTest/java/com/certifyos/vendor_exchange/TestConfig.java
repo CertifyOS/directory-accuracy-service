@@ -26,6 +26,9 @@ public final class TestConfig {
         values.put("vendor-exchange.dal.url", "http://localhost:0");
         values.put("vendor-exchange.dal.iap-client-id", "test-dal-iap-client-id");
         values.put("vendor-exchange.api-layer.url", "http://localhost:0");
+        values.put("vendor-exchange.ingestion.archive-bucket", "test-archive-bucket");
+        values.put("vendor-exchange.file-ingestion.url", "http://localhost:0");
+        values.put("vendor-exchange.file-ingestion.mapping-id", "map-candor-recs-v1");
         // api-layer internal is behind IAP with a Google-managed client; the token service is mocked
         // where a test crosses it, so this only decides whether the Proxy-Authorization header is sent.
         values.put("vendor-exchange.api-layer.iap-audience", "/projects/1/global/backendServices/2");
