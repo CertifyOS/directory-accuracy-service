@@ -3,8 +3,25 @@ openapi: 3.1.0
 tags:
 - name: internal
 - name: vendor-exports
+- name: vendor-ingestion
 components:
   schemas:
+    AttachRequest:
+      type: object
+      properties:
+        exportBatchId:
+          type: string
+        reason:
+          type: string
+    AttachResponse:
+      type: object
+      properties:
+        uploadId:
+          type: string
+        state:
+          type: string
+        jobId:
+          type: string
     CadenceRequest:
       type: object
       properties:
@@ -29,6 +46,11 @@ components:
         lte:
           type: string
     DisableRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    DiscardRequest:
       type: object
       properties:
         reason:
@@ -194,6 +216,41 @@ paths:
       responses:
         "204":
           description: Acknowledged
+        "401":
+          description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
+            \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "400":
+          description: Bad Request
+  /internal/vendor-ingestion/arrivals:
+    post:
+      summary: Receive a vendor bucket storage notification
+      description: "Pub/Sub push endpoint for object notifications under the vendor\
+        \ bucket. Requires the subscription's OIDC identity token; reads the message\
+        \ attributes only and answers 204 to acknowledge every outcome, including\
+        \ an event it ignores or cannot match; answers 503 while the service is switched\
+        \ off so the message is redelivered."
+      tags:
+      - internal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PubSubPushMessage"
+        required: true
+      responses:
+        "204":
+          description: Acknowledged
+        "503":
+          description: The service is switched off (SERVICE_DISABLED); Pub/Sub redelivers
+            the message
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
             \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
@@ -1074,6 +1131,230 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SupersedeResponse"
+      security:
+      - platform-token: []
+  /v1/vendor-ingestion/batches/{exportBatchId}/inbound-files:
+    get:
+      summary: List a batch's inbound files
+      description: "Every vendor upload claimed on the batch, the first one first,\
+        \ with what each stage of ingestion wrote; internal job ids are left out."
+      tags:
+      - vendor-ingestion
+      parameters:
+      - name: exportBatchId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, REASON_REQUIRED, INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such batch or unmatched upload in the caller's tenant (BATCH_NOT_FOUND,\
+            \ UNMATCHED_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-ingestion/unmatched-uploads:
+    get:
+      summary: List unmatched uploads
+      description: "Open uploads in the caller's tenant folder that no batch took,\
+        \ oldest first, with the reason. limit is 1 to 200, default 50."
+      tags:
+      - vendor-ingestion
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int32
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, REASON_REQUIRED, INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such batch or unmatched upload in the caller's tenant (BATCH_NOT_FOUND,\
+            \ UNMATCHED_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-ingestion/unmatched-uploads/{uploadId}/attach:
+    post:
+      summary: Attach an unmatched upload to a batch
+      description: "The batch must be the caller's and DELIVERED or SUPERSEDED. Claims\
+        \ the upload on it as the storage event would have, with the caller as actor,\
+        \ resolves the row ATTACHED and starts ingestion. A batch that already has\
+        \ an upload logs this one as a duplicate."
+      tags:
+      - vendor-ingestion
+      parameters:
+      - name: uploadId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachRequest"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, REASON_REQUIRED, INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such batch or unmatched upload in the caller's tenant (BATCH_NOT_FOUND,\
+            \ UNMATCHED_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "202":
+          description: Attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachResponse"
+      security:
+      - platform-token: []
+  /v1/vendor-ingestion/unmatched-uploads/{uploadId}/discard:
+    post:
+      summary: Discard an unmatched upload
+      description: Resolves the row DISCARDED with the reason. The object stays in
+        the vendor bucket.
+      tags:
+      - vendor-ingestion
+      parameters:
+      - name: uploadId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscardRequest"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, REASON_REQUIRED, INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such batch or unmatched upload in the caller's tenant (BATCH_NOT_FOUND,\
+            \ UNMATCHED_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
       security:
       - platform-token: []
 info:

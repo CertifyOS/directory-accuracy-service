@@ -105,13 +105,17 @@ public class MongoIndexes {
                         new IndexOptions()
                                 .name("batches_inbound_external_ref")
                                 .partialFilterExpression(Filters.exists("inboundFiles.externalRef")));
-        // batches: a redelivered storage event finds its entry by upload id
+        // batches: a redelivered storage event finds its entry by upload id, and one upload lives on
+        // one batch. A unique multikey index enforces each upload id across documents (not within one
+        // array, which the claim's filter guards). Replaces batches_inbound_upload_id, which was never
+        // released: MongoDB refuses a second index on the same key under another name.
         collections
                 .batches()
                 .createIndex(
                         Indexes.ascending("inboundFiles.uploadId"),
                         new IndexOptions()
-                                .name("batches_inbound_upload_id")
+                                .name("batches_inbound_upload_id_unique")
+                                .unique(true)
                                 .partialFilterExpression(Filters.exists("inboundFiles.uploadId")));
 
         // field_recommendations

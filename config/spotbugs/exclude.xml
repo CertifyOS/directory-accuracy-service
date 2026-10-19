@@ -16,4 +16,14 @@
             <Bug pattern="EI_EXPOSE_REP2"/>
         </Or>
     </Match>
+    <!--
+        The arrival handler refuses a completeness signal it does not implement in its constructor, so
+        a misconfigured deployment fails at boot (the bean is @Startup). The finalizer attack this rule
+        guards against needs a subclass with a finalizer constructed by untrusted code; Arc alone
+        constructs this bean.
+    -->
+    <Match>
+        <Class name="com.certifyos.vendor_exchange.ingestion.events.ArrivalHandler"/>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
 </FindBugsFilter>

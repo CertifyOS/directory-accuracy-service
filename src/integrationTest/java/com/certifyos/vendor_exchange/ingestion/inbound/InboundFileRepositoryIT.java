@@ -11,6 +11,8 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Loc
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.model.Filters;
@@ -114,6 +116,27 @@ public class InboundFileRepositoryIT {
         Assertions.assertEquals(1, stored.size());
         Assertions.assertEquals("RECEIVED", stored.get(0).getString("state"));
         Assertions.assertTrue(inbound.findByUploadId("nobody|to/x|1").isEmpty());
+    }
+
+    @Test
+    void claimOfOneUploadOnASecondBatchIsRefusedByTheUniqueIndex() {
+        ExportBatch first = InboundFixtures.deliveredBatch(transactions, batches, collections, "inrepo-uniq-a");
+        ExportBatch second = InboundFixtures.deliveredBatch(transactions, batches, collections, "inrepo-uniq-b");
+        InboundFile entry = upload("inrepo-uniq-a", first.id(), "2101");
+        Assertions.assertTrue(transactions
+                .run(session -> inbound.claim(session, first.id(), entry))
+                .claimed());
+
+        MongoWriteException refused = Assertions.assertThrows(
+                MongoWriteException.class,
+                () -> transactions.run(session -> inbound.claim(session, second.id(), entry)));
+
+        Assertions.assertEquals(ErrorCategory.DUPLICATE_KEY, refused.getError().getCategory());
+        Assertions.assertTrue(refused.getMessage().contains("batches_inbound_upload_id_unique"), refused.getMessage());
+        Assertions.assertTrue(inbound.entriesFor(second.id()).isEmpty(), "the second batch took nothing");
+        Assertions.assertEquals(
+                first.id(),
+                inbound.findByUploadId(entry.uploadId()).orElseThrow().batch().id());
     }
 
     @Test
@@ -300,7 +323,7 @@ public class InboundFileRepositoryIT {
                         .state());
 
         String plan = winningPlan(InboundFileRepository.byUploadId(secondUpload));
-        Assertions.assertTrue(plan.contains("batches_inbound_upload_id"), plan);
+        Assertions.assertTrue(plan.contains("batches_inbound_upload_id_unique"), plan);
     }
 
     /** The winning plan of a find on the batches collection, as JSON (classic and SBE shapes both name the index). */
@@ -370,7 +393,7 @@ public class InboundFileRepositoryIT {
                 oldest,
                 inbound.oldestUpdatedAtIn(InboundFileState.INGESTION_FAILED).orElseThrow());
         String countPlan = aggregationPlan(InboundFileRepository.countPipeline());
-        Assertions.assertTrue(countPlan.contains("batches_inbound_upload_id"), countPlan);
+        Assertions.assertTrue(countPlan.contains("batches_inbound_upload_id_unique"), countPlan);
         String oldestPlan = aggregationPlan(InboundFileRepository.oldestPipeline(InboundFileState.INGESTION_FAILED));
         Assertions.assertTrue(oldestPlan.contains("batches_inbound_state_updated"), oldestPlan);
     }
