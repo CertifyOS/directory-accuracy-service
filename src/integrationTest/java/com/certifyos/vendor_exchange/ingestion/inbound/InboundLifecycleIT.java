@@ -136,6 +136,83 @@ public class InboundLifecycleIT {
     }
 
     @Test
+    void claimInWritesTheEventsInTheCallersTransactionWithTheCallersActor() {
+        String tenant = "inlife-operator";
+        String operator = "user:operator@example.com";
+        ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, tenant);
+        InboundFile first = upload(tenant, batch.id(), "5201", null);
+        InboundFile second = upload(tenant, batch.id(), "5202", null);
+        int before = trail(batch.id()).size();
+
+        Assertions.assertEquals(
+                InboundLifecycle.Outcome.RECEIVED,
+                transactions.run(session -> lifecycle.claimIn(session, batch, first, operator, NOW)));
+        ExportBatch acknowledged = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(first.uploadId(), acknowledged.inboundBatchId());
+        Assertions.assertEquals(
+                InboundLifecycle.Outcome.DUPLICATE_LOGGED,
+                transactions.run(session -> lifecycle.claimIn(session, acknowledged, second, operator, NOW)));
+
+        List<AuditEvent> events = since(batch.id(), before);
+        Assertions.assertEquals(
+                List.of(
+                        AuditEventType.INBOUND_FILE_RECEIVED,
+                        AuditEventType.EXPORT_BATCH_ACKNOWLEDGED,
+                        AuditEventType.INBOUND_FILE_DUPLICATE_LOGGED),
+                types(events));
+        for (AuditEvent event : events) {
+            Assertions.assertEquals(operator, event.actor(), event.type() + " names the caller");
+        }
+        Assertions.assertEquals(
+                0.0,
+                counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant),
+                "claimIn records no metric; its caller does after the commit");
+    }
+
+    @Test
+    void jobRecordedSetsTheJobIdOnlyInReceived() {
+        InboundFixtures.Seeded received = InboundFixtures.deliveredBatchWithEntry(
+                transactions, batches, collections, "inlife-jobrec", InboundFileState.RECEIVED);
+        InboundFixtures.Seeded archiving = InboundFixtures.deliveredBatchWithEntry(
+                transactions, batches, collections, "inlife-jobrec-moved", InboundFileState.ARCHIVING);
+        UUID jobId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        int before = trail(received.batch().id()).size();
+
+        Assertions.assertTrue(lifecycle.jobRecorded(
+                inbound.findByUploadId(received.entry().uploadId()).orElseThrow(), jobId, NOW));
+        InboundFile recorded = entry(received.entry().uploadId());
+        Assertions.assertEquals(jobId.toString(), recorded.jobId());
+        Assertions.assertEquals(InboundFileState.RECEIVED, recorded.state());
+        Assertions.assertEquals(before, trail(received.batch().id()).size(), "no event for a job id");
+
+        Assertions.assertFalse(lifecycle.jobRecorded(
+                inbound.findByUploadId(archiving.entry().uploadId()).orElseThrow(), jobId, NOW));
+        Assertions.assertEquals(
+                archiving.entry().jobId(),
+                entry(archiving.entry().uploadId()).jobId(),
+                "an entry past RECEIVED keeps its job");
+    }
+
+    @Test
+    void acknowledgementCarriesTheBatchAttemptAndTheFileEventTheEntryAttempt() {
+        String tenant = "inlife-attempt";
+        ExportBatch delivered = InboundFixtures.deliveredBatch(transactions, batches, collections, tenant);
+        collections.batches().updateOne(Filters.eq("_id", delivered.id()), Updates.set("attempt", 2));
+        ExportBatch batch = batches.find(delivered.id()).orElseThrow();
+        Assertions.assertEquals(2, batch.attempt());
+        InboundFile first = upload(tenant, batch.id(), "5101", null);
+        int before = trail(batch.id()).size();
+
+        Assertions.assertEquals(InboundLifecycle.Outcome.RECEIVED, lifecycle.received(batch, first, NOW));
+
+        List<AuditEvent> events = since(batch.id(), before);
+        Assertions.assertEquals(
+                List.of(AuditEventType.INBOUND_FILE_RECEIVED, AuditEventType.EXPORT_BATCH_ACKNOWLEDGED), types(events));
+        Assertions.assertEquals(1, events.get(0).attempt(), "a file event carries the entry's ingestion attempt");
+        Assertions.assertEquals(2, events.get(1).attempt(), "an export event carries the batch's attempt");
+    }
+
+    @Test
     void archivingThenArchivedThenRequestedWriteTheirEvents() {
         String tenant = "inlife-path";
         InboundFixtures.Seeded seeded = InboundFixtures.deliveredBatchWithEntry(
@@ -149,6 +226,13 @@ public class InboundLifecycleIT {
         Assertions.assertEquals(InboundFileState.ARCHIVING, entry(uploadId).state());
         Assertions.assertEquals(before, trail(batchId).size(), "archiving writes no event: nothing was copied yet");
         Assertions.assertFalse(lifecycle.archiving(received, NOW.plusSeconds(1)), "a second job finds it moved");
+        Assertions.assertEquals(
+                uploadId,
+                inbound.findByExternalRef(Ids.externalRef(batchId, InboundFixtures.GENERATION))
+                        .orElseThrow()
+                        .entry()
+                        .uploadId(),
+                "a completion event finds the entry from the first job write");
 
         Located archiving = inbound.findByUploadId(uploadId).orElseThrow();
         String archivePath = "gs://vendor-ingestion-archive/inlife-path/" + InboundFixtures.GENERATION + ".csv";

@@ -85,7 +85,8 @@ public record InboundFile(
             Long invalidRows,
             String completionSource,
             String reason) {
-        Document toDocument() {
+        /** The BSON form, absent fields left out. */
+        public Document toDocument() {
             Document doc = new Document();
             Documents.put(doc, "status", status);
             Documents.put(doc, "populatedRows", populatedRows);
@@ -114,7 +115,8 @@ public record InboundFile(
      * @param chunks chunks written so far
      */
     public record Checkpoint(String after, Long chunks) {
-        Document toDocument() {
+        /** The BSON form, absent fields left out. */
+        public Document toDocument() {
             Document doc = new Document();
             Documents.put(doc, "after", after);
             Documents.put(doc, "chunks", chunks);
@@ -139,7 +141,8 @@ public record InboundFile(
             Long confirmedFields,
             Long unverifiedFields,
             Long practitionerFieldDisagreements) {
-        Document toDocument() {
+        /** The BSON form, absent fields left out. */
+        public Document toDocument() {
             Document doc = new Document();
             Documents.put(doc, "fieldRecommendations", fieldRecommendations);
             Documents.put(doc, "confirmedFields", confirmedFields);

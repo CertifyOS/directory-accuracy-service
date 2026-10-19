@@ -6,17 +6,14 @@ import com.certifyos.vendor_exchange.audit.AuditEventType;
 import com.certifyos.vendor_exchange.audit.AuditRepository;
 import com.certifyos.vendor_exchange.clients.ArchiveStore;
 import com.certifyos.vendor_exchange.clients.FileIngestionCounts;
-import com.certifyos.vendor_exchange.export.batch.BatchState;
 import com.certifyos.vendor_exchange.export.batch.ExportBatch;
-import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
-import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Claim;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
+import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -52,39 +49,32 @@ public class InboundLifecycle {
     static final String STATUS_INVALID = "INVALID";
 
     /** The most characters of {@code lastError} kept on the entry and the event. */
-    static final int LAST_ERROR_MAX = 500;
+    public static final int LAST_ERROR_MAX = 500;
 
     private static final Logger LOG = Logger.getLogger(InboundLifecycle.class);
 
     private final InboundFileRepository inbound;
-    private final ExportBatchRepository batches;
     private final AuditRepository audit;
     private final Transactions transactions;
     private final VendorExchangeMetrics metrics;
-    private final Clock clock;
+    private final InboundClaims claims;
 
     public InboundLifecycle(
             InboundFileRepository inbound,
-            ExportBatchRepository batches,
             AuditRepository audit,
             Transactions transactions,
             VendorExchangeMetrics metrics,
-            Clock clock) {
+            InboundClaims claims) {
         this.inbound = inbound;
-        this.batches = batches;
         this.audit = audit;
         this.transactions = transactions;
         this.metrics = metrics;
-        this.clock = clock;
+        this.claims = claims;
     }
 
     /**
-     * Claims an upload on its batch. The first upload of the batch is {@code RECEIVED}: in the same
-     * transaction the batch gets {@code acknowledgedAt} (the storage event time, or {@code now} when
-     * the event carried none) and {@code inboundBatchId} (the upload id), written in the state the
-     * caller read, and {@code INBOUND_FILE_RECEIVED} then {@code EXPORT_BATCH_ACKNOWLEDGED} are
-     * written. A later upload is {@code DUPLICATE_LOGGED} with one event naming the first upload. An
-     * upload already on the batch writes nothing.
+     * Claims an upload on its batch in its own transaction, with {@link Actors#INGESTION} as the
+     * actor ({@link #claimIn}), then records the arrival metric and logs the outcome.
      *
      * @param batch the batch the object name points at, {@code DELIVERED} or {@code SUPERSEDED}
      * @param entry the upload, as {@link InboundFile#received} builds it
@@ -95,22 +85,7 @@ public class InboundLifecycle {
      *     the transaction rolled back and the claim with it, so a redelivery starts over
      */
     public Outcome received(ExportBatch batch, InboundFile entry, Instant now) {
-        if (batch.state() != BatchState.DELIVERED && batch.state() != BatchState.SUPERSEDED) {
-            throw new IllegalArgumentException(
-                    batch.id() + " is " + batch.state() + "; only a delivered batch takes an upload");
-        }
-        Outcome outcome = transactions.run(session -> {
-            Claim claim = inbound.claim(session, batch.id(), entry);
-            if (!claim.claimed()) {
-                return Outcome.ALREADY_CLAIMED;
-            }
-            if (claim.state() == InboundFileState.RECEIVED) {
-                acknowledge(session, batch, entry, now);
-                return Outcome.RECEIVED;
-            }
-            logDuplicate(session, batch, entry, now);
-            return Outcome.DUPLICATE_LOGGED;
-        });
+        Outcome outcome = transactions.run(session -> claimIn(session, batch, entry, Actors.INGESTION, now));
         switch (outcome) {
             case RECEIVED -> metrics.arrivalReceived(batch.tenantId(), batch.vendor());
             case DUPLICATE_LOGGED -> metrics.arrivalDuplicateLogged(batch.tenantId(), batch.vendor());
@@ -122,30 +97,53 @@ public class InboundLifecycle {
         return outcome;
     }
 
-    private void acknowledge(ClientSession session, ExportBatch batch, InboundFile entry, Instant now) {
-        Instant acknowledgedAt = entry.eventTime() == null ? now : entry.eventTime();
-        Bson updates = Updates.combine(
-                Updates.set("acknowledgedAt", acknowledgedAt), Updates.set("inboundBatchId", entry.uploadId()));
-        if (!batches.updateInState(session, batch.id(), batch.state(), now, updates)) {
-            throw new IllegalStateException(
-                    batch.id() + " is no longer " + batch.state() + "; acknowledgement not written");
-        }
-        audit.write(
+    /**
+     * Claims an upload on its batch inside the caller's transaction. The first upload of the batch
+     * is {@code RECEIVED}: the batch gets {@code acknowledgedAt} (the storage event time, or {@code
+     * now} when the event carried none) and {@code inboundBatchId} (the upload id), written in the
+     * state the caller read, and {@code INBOUND_FILE_RECEIVED} then {@code EXPORT_BATCH_ACKNOWLEDGED}
+     * are written. A later upload is {@code DUPLICATE_LOGGED} with one event naming the first upload.
+     * An upload already on the batch writes nothing. No metric and no log line: the caller records
+     * them after its commit.
+     *
+     * @param session the caller's transaction
+     * @param batch the batch the object name points at, {@code DELIVERED} or {@code SUPERSEDED}
+     * @param entry the upload, as {@link InboundFile#received} builds it
+     * @param actor who claims it, {@link Actors#INGESTION} or an operator
+     * @param now the time of the write
+     * @return what happened
+     * @throws IllegalArgumentException when the batch is in another state
+     * @throws IllegalStateException when the batch left the state read before the acknowledgement;
+     *     the caller's transaction must roll back
+     */
+    public Outcome claimIn(ClientSession session, ExportBatch batch, InboundFile entry, String actor, Instant now) {
+        return claims.claimIn(session, batch, entry, actor, now);
+    }
+
+    /**
+     * Records the job now responsible for a {@code RECEIVED} entry (the arrival handler, after its
+     * enqueue). No event; the state does not change.
+     *
+     * @param located the entry as the caller read it
+     * @param jobId the enqueued job
+     * @param now the time of the write
+     * @return true when the entry was still {@code RECEIVED}
+     */
+    public boolean jobRecorded(Located located, UUID jobId, Instant now) {
+        boolean recorded = transactions.run(session -> inbound.updateInState(
                 session,
-                event(AuditEventType.INBOUND_FILE_RECEIVED, batch, entry, now)
-                        .detail("objectName", entry.objectName())
-                        .detail("generation", entry.generation())
-                        .detail("vendorBatchId", entry.vendorBatchId())
-                        .detail("eventTime", entry.eventTime())
-                        .detail("overwroteGeneration", entry.overwroteGeneration())
-                        .build());
-        audit.write(
-                session,
-                event(AuditEventType.EXPORT_BATCH_ACKNOWLEDGED, batch, entry, now)
-                        .detail("uploadId", entry.uploadId())
-                        .detail("vendorBatchId", entry.vendorBatchId())
-                        .detail("daysToResponse", daysToResponse(batch.deliveredAt(), acknowledgedAt))
-                        .build());
+                located.batch().id(),
+                located.entry().uploadId(),
+                InboundFileState.RECEIVED,
+                now,
+                Updates.set(InboundFileRepository.entry("jobId"), jobId.toString())));
+        LOG.infof(
+                "%s upload %s: job %s %s",
+                located.batch().id(),
+                located.entry().uploadId(),
+                jobId,
+                recorded ? "recorded" : "not recorded, the entry left RECEIVED");
+        return recorded;
     }
 
     /** Whole days from delivery to the vendor's upload, never negative; 0 when delivery has no time. */
@@ -156,24 +154,10 @@ public class InboundLifecycle {
         return Math.max(0, ChronoUnit.DAYS.between(deliveredAt, acknowledgedAt));
     }
 
-    private void logDuplicate(ClientSession session, ExportBatch batch, InboundFile entry, Instant now) {
-        InboundFile first = inbound.firstEntry(session, batch.id())
-                .orElseThrow(() -> new IllegalStateException(batch.id() + " logged a duplicate with no first entry"));
-        audit.write(
-                session,
-                event(AuditEventType.INBOUND_FILE_DUPLICATE_LOGGED, batch, entry, now)
-                        .detail("objectName", entry.objectName())
-                        .detail("generation", entry.generation())
-                        .detail("firstUploadId", first.uploadId())
-                        .detail(
-                                "firstUploadState",
-                                first.state() == null ? null : first.state().name())
-                        .build());
-    }
-
     /**
-     * The archive job starts: {@code RECEIVED} to {@code ARCHIVING}. No event; the copy has not
-     * happened.
+     * The archive job starts: {@code RECEIVED} to {@code ARCHIVING}, with the deterministic {@code
+     * externalRef} so a completion event finds the entry from the first job write. No event; the
+     * copy has not happened.
      *
      * @param located the entry as the job read it
      * @param now the time of the write
@@ -187,7 +171,9 @@ public class InboundLifecycle {
                 InboundFileState.RECEIVED,
                 InboundFileState.ARCHIVING,
                 now,
-                null));
+                Updates.set(
+                        InboundFileRepository.entry("externalRef"),
+                        Ids.externalRef(located.batch().id(), located.entry().generation()))));
         logMove(located, InboundFileState.ARCHIVING, moved);
         return moved;
     }
@@ -404,7 +390,8 @@ public class InboundLifecycle {
         return moved;
     }
 
-    static String truncate(String lastError) {
+    /** {@code lastError} cut to {@value #LAST_ERROR_MAX} characters; null stays null. */
+    public static String truncate(String lastError) {
         if (lastError == null || lastError.length() <= LAST_ERROR_MAX) {
             return lastError;
         }
@@ -435,13 +422,24 @@ public class InboundLifecycle {
     }
 
     private static AuditEvent.Builder event(AuditEventType type, Located located, Instant now) {
-        return event(type, located.batch(), located.entry(), now);
+        return envelope(type, located.batch(), located.entry(), Actors.INGESTION)
+                .occurredAt(now);
     }
 
-    private static AuditEvent.Builder event(AuditEventType type, ExportBatch batch, InboundFile entry, Instant now) {
+    /**
+     * The envelope every inbound file event shares: tenant, vendor, batch, the entry's attempt, the
+     * upload and the actor. The caller adds {@code occurredAt} and the details; an export event
+     * resets the attempt to the batch's.
+     *
+     * @param type the event type
+     * @param batch the batch the entry is on
+     * @param entry the entry
+     * @param actor who wrote it
+     * @return the builder
+     */
+    public static AuditEvent.Builder envelope(AuditEventType type, ExportBatch batch, InboundFile entry, String actor) {
         return AuditEvent.forBatch(type, batch.tenantId(), batch.vendor(), batch.id(), entry.attempt())
                 .upload(entry.uploadId())
-                .actor(Actors.INGESTION)
-                .occurredAt(now);
+                .actor(actor);
     }
 }
