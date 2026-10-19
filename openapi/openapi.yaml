@@ -317,6 +317,33 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "400":
           description: Bad Request
+  /internal/vendor-ingestion/ov-generated:
+    post:
+      summary: Receive a survivorship operational-value event
+      description: "Pub/Sub push endpoint for mdm.slice.ov_generated. Requires the\
+        \ subscription's OIDC identity token; reads the operational value back for\
+        \ fields released through a candor slice and answers 204 to acknowledge every\
+        \ outcome, including an event that is not ours."
+      tags:
+      - internal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PubSubPushMessage"
+        required: true
+      responses:
+        "204":
+          description: Acknowledged
+        "401":
+          description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
+            \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "400":
+          description: Bad Request
   /v1/vendor-exports:
     get:
       summary: List export batches

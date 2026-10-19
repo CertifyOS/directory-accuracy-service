@@ -1,5 +1,6 @@
 package com.certifyos.vendor_exchange.ingestion.release;
 
+import com.certifyos.vendor_exchange.ingestion.staging.FieldLevel;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.vendor_exchange.ingestion.staging.ReviewStatus;
@@ -86,6 +87,30 @@ public class ReleaseFieldRepository {
                         Filters.eq("exportBatchId", exportBatchId),
                         Filters.eq("reviewStatus", ReviewStatus.APPROVED.name()),
                         Filters.in("field", fields)),
+                limit);
+    }
+
+    /**
+     * The {@code RELEASING} fields of one Golden entity, across releases: a practitioner's own fields
+     * (no location) on {@code field_recs_practitioner}, or every practitioner's fields at one location
+     * on {@code field_recs_releasing_location}. The read-back finishes them on the entity's event.
+     *
+     * @param tenantId the tenant
+     * @param certifyId the practitioner's or the location's certify id
+     * @param level which of the two the id is
+     * @param limit the most documents to return, at least 1
+     * @return the documents by id
+     */
+    public List<FieldRecommendation> releasingAt(String tenantId, String certifyId, FieldLevel level, int limit) {
+        Bson entity = level == FieldLevel.LOCATION
+                ? Filters.eq("location.certifyLocationId", certifyId)
+                : Filters.and(
+                        Filters.eq("practitioner.certifyPractitionerId", certifyId), Filters.exists("location", false));
+        return read(
+                Filters.and(
+                        Filters.eq("tenantId", tenantId),
+                        entity,
+                        Filters.eq("reviewStatus", ReviewStatus.RELEASING.name())),
                 limit);
     }
 

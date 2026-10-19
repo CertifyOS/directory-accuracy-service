@@ -106,6 +106,30 @@ public final class ReleaseFixtures {
                 null);
     }
 
+    /** The release record once the release job's DAL write was accepted. */
+    public static GoldenRecordUpdate written(
+            String releaseId,
+            String resource,
+            String crosswalkId,
+            String sliceId,
+            Instant writtenAt,
+            String deadlineJobId) {
+        return new GoldenRecordUpdate(
+                releaseId,
+                REVIEWER,
+                STAGED.plusSeconds(120),
+                "SLICE",
+                resource,
+                crosswalkId,
+                sliceId,
+                writtenAt,
+                deadlineJobId,
+                null,
+                null,
+                null,
+                null);
+    }
+
     /** Stores the documents and returns them. */
     public static List<FieldRecommendation> insert(Collections collections, FieldRecommendation... docs) {
         for (FieldRecommendation doc : docs) {

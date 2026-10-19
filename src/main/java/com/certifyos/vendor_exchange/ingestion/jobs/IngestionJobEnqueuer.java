@@ -67,6 +67,24 @@ public class IngestionJobEnqueuer {
     }
 
     /**
+     * The id of a release's read-back deadline: the one the release job records on the fields as
+     * {@code deadlineJobId} and the event handler deletes once the release is read back (plan P13).
+     *
+     * @param releaseId the release
+     * @return a stable UUID
+     */
+    public static UUID readBackDeadlineId(String releaseId) {
+        return JobIds.of(ReleaseReadBackDeadlineJob.NAME, releaseId, 1);
+    }
+
+    /** Schedules a release's read-back deadline at {@code at} and returns its id. */
+    public UUID readBackDeadline(String tenantId, String certifyPractitionerId, String releaseId, Instant at) {
+        UUID id = readBackDeadlineId(releaseId);
+        scheduler.schedule(id, at, new ReleaseReadBackDeadlineJobRequest(tenantId, certifyPractitionerId, releaseId));
+        return id;
+    }
+
+    /**
      * Deletes a pending job (a deadline check the completion event made unnecessary). An id JobRunr
      * has never seen is ignored; both not-found exceptions are caught, as in the export lane.
      */

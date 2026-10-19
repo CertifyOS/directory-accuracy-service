@@ -156,6 +156,15 @@ public class MongoIndexes {
                                 .name("field_recs_open_list_any_field")
                                 .partialFilterExpression(openStates));
 
+        // the release read-back's location lookup: only RELEASING fields, a handful at any time
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "location.certifyLocationId"),
+                        new IndexOptions()
+                                .name("field_recs_releasing_location")
+                                .partialFilterExpression(Filters.eq("reviewStatus", "RELEASING")));
+
         // vendor_rejected_values: the only TTL index in the service (design D16, plan P4)
         collections
                 .rejectedValues()
