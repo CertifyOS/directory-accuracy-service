@@ -8,11 +8,13 @@ import com.certifyos.vendor_exchange.audit.AuditEventType;
 import com.certifyos.vendor_exchange.audit.AuditRepository;
 import com.certifyos.vendor_exchange.clients.ArchiveStore;
 import com.certifyos.vendor_exchange.clients.FileIngestionCounts;
+import com.certifyos.vendor_exchange.export.batch.BatchState;
 import com.certifyos.vendor_exchange.export.batch.ExportBatch;
 import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
 import com.certifyos.vendor_exchange.ingestion.InboundFixtures;
 import com.certifyos.vendor_exchange.ingestion.events.ArrivalEvent;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
+import com.certifyos.vendor_exchange.ingestion.jobs.IngestionLogContext;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Ids;
@@ -28,6 +30,7 @@ import jakarta.inject.Inject;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.jobrunr.jobs.context.JobContext;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -133,6 +136,68 @@ public class InboundLifecycleIT {
                 afterDuplicate.version(), batches.find(batch.id()).orElseThrow().version());
         Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
         Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, tenant));
+    }
+
+    @Test
+    void receivedRollsBackTheClaimWhenTheBatchLeftTheStateRead() {
+        String tenant = "inlife-rollback";
+        ExportBatch delivered = InboundFixtures.deliveredBatch(transactions, batches, collections, tenant);
+        transactions.run(session -> batches.transition(
+                session, delivered.id(), BatchState.DELIVERED, BatchState.SUPERSEDED, NOW.minusSeconds(60), null));
+        ExportBatch superseded = batches.find(delivered.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.SUPERSEDED, superseded.state());
+        InboundFile first = upload(tenant, delivered.id(), "5401", null);
+        int before = trail(delivered.id()).size();
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> lifecycle.received(delivered, first, NOW),
+                "the snapshot says DELIVERED, the stored batch is SUPERSEDED");
+
+        Assertions.assertTrue(
+                inbound.findByUploadId(first.uploadId()).isEmpty(), "the claim rolled back with the acknowledgement");
+        Assertions.assertEquals(before, trail(delivered.id()).size(), "no event");
+        ExportBatch after = batches.find(delivered.id()).orElseThrow();
+        Assertions.assertEquals(superseded.version(), after.version(), "the batch was not written");
+        Assertions.assertNull(after.acknowledgedAt());
+        Assertions.assertNull(after.inboundBatchId());
+        Assertions.assertEquals(0.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
+    }
+
+    @Test
+    void jobWrittenEventsCarryTheJobIdAndHttpPathEventsDoNot() {
+        String tenant = "inlife-jobid";
+        ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, tenant);
+        InboundFile first = upload(tenant, batch.id(), "5501", null);
+        int before = trail(batch.id()).size();
+        UUID jobId = UUID.fromString("44444444-4444-4444-4444-444444444444");
+        JobContext running = new JobContext() {
+            @Override
+            public UUID getJobId() {
+                return jobId;
+            }
+        };
+
+        Assertions.assertEquals(InboundLifecycle.Outcome.RECEIVED, lifecycle.received(batch, first, NOW));
+        try (IngestionLogContext ignored = IngestionLogContext.open(batch.id(), first.uploadId(), running)) {
+            Assertions.assertTrue(
+                    lifecycle.archiving(inbound.findByUploadId(first.uploadId()).orElseThrow(), NOW.plusSeconds(1)));
+            Assertions.assertTrue(lifecycle.archived(
+                    inbound.findByUploadId(first.uploadId()).orElseThrow(),
+                    new ArchiveStore.Copied("gs://vendor-ingestion-archive/inlife-jobid/5501.csv", 1L, false),
+                    NOW.plusSeconds(2)));
+        }
+
+        List<AuditEvent> events = since(batch.id(), before);
+        Assertions.assertEquals(
+                List.of(
+                        AuditEventType.INBOUND_FILE_RECEIVED,
+                        AuditEventType.EXPORT_BATCH_ACKNOWLEDGED,
+                        AuditEventType.INBOUND_FILE_ARCHIVED),
+                types(events));
+        Assertions.assertNull(events.get(0).jobId(), "the arrival is an HTTP path: no job");
+        Assertions.assertNull(events.get(1).jobId(), "the arrival is an HTTP path: no job");
+        Assertions.assertEquals(jobId.toString(), events.get(2).jobId(), "the job that wrote the event");
     }
 
     @Test

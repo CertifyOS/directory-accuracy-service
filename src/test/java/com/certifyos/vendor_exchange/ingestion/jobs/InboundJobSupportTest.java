@@ -42,8 +42,20 @@ class InboundJobSupportTest {
         Mockito.when(inbound.findByUploadId(UPLOAD_ID)).thenReturn(Optional.empty());
 
         Assertions.assertTrue(support(inbound)
-                .loadExpecting("request-ingestion", UPLOAD_ID, EXPECTED)
+                .loadExpecting("request-ingestion", UPLOAD_ID, 1, EXPECTED)
                 .isEmpty());
+    }
+
+    @Test
+    void entryOfAnotherAttemptIsEmpty() {
+        InboundFileRepository inbound = Mockito.mock(InboundFileRepository.class);
+        Mockito.when(inbound.findByUploadId(UPLOAD_ID)).thenReturn(Optional.of(in(InboundFileState.ARCHIVING)));
+
+        Assertions.assertTrue(
+                support(inbound)
+                        .loadExpecting("request-ingestion", UPLOAD_ID, 2, EXPECTED)
+                        .isEmpty(),
+                "a request for attempt 2 does not work on the attempt 1 entry");
     }
 
     @Test
@@ -52,7 +64,7 @@ class InboundJobSupportTest {
         Mockito.when(inbound.findByUploadId(UPLOAD_ID)).thenReturn(Optional.of(in(InboundFileState.PARSED)));
 
         Assertions.assertTrue(support(inbound)
-                .loadExpecting("request-ingestion", UPLOAD_ID, EXPECTED)
+                .loadExpecting("request-ingestion", UPLOAD_ID, 1, EXPECTED)
                 .isEmpty());
     }
 
@@ -65,7 +77,7 @@ class InboundJobSupportTest {
         try (IngestionLogContext ignored =
                 IngestionLogContext.open(located.batch().id(), UPLOAD_ID, null)) {
             Assertions.assertEquals(
-                    Optional.of(located), support(inbound).loadExpecting("request-ingestion", UPLOAD_ID, EXPECTED));
+                    Optional.of(located), support(inbound).loadExpecting("request-ingestion", UPLOAD_ID, 1, EXPECTED));
             Assertions.assertEquals("org-xyz", MDC.get(IngestionLogContext.TENANT_ID));
         }
     }

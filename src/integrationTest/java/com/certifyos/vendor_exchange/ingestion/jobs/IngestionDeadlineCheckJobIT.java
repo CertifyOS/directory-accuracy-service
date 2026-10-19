@@ -194,6 +194,21 @@ class IngestionDeadlineCheckJobIT {
     }
 
     @Test
+    void entryStillArchivingThrowsForARetryWithoutAStatusCall() {
+        String tenant = "ingdl-archiving";
+        Seeded seeded = seed(tenant, InboundFileState.ARCHIVING);
+        InboundFile before = entry(seeded);
+        int eventsBefore = events(seeded);
+
+        IllegalStateException early = Assertions.assertThrows(IllegalStateException.class, () -> run(seeded));
+
+        Assertions.assertTrue(early.getMessage().contains("ARCHIVING"), early.getMessage());
+        WireMockUpstreams.verify(0, WireMock.getRequestedFor(WireMock.urlEqualTo(statusPath(tenant))));
+        Assertions.assertEquals(before, entry(seeded));
+        Assertions.assertEquals(eventsBefore, events(seeded));
+    }
+
+    @Test
     void entryAlreadyParsedMakesNoStatusCall() {
         String tenant = "ingdl-parsed";
         Seeded seeded = seed(tenant, InboundFileState.PARSED);

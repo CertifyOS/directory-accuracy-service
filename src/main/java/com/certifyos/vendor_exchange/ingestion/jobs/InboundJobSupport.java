@@ -38,17 +38,25 @@ public class InboundJobSupport {
      *
      * @param job the job name, for the log line
      * @param uploadId the upload
+     * @param attempt the entry attempt the request was made for
      * @param expected the states the job works from
-     * @return the entry with its batch, or empty when it is missing or in another state (each
-     *     logged once)
+     * @return the entry with its batch, or empty when it is missing, of another attempt or in another
+     *     state (each logged once)
      */
-    public Optional<Located> loadExpecting(String job, String uploadId, Set<InboundFileState> expected) {
+    public Optional<Located> loadExpecting(String job, String uploadId, int attempt, Set<InboundFileState> expected) {
         Optional<Located> located = inbound.findByUploadId(uploadId);
         if (located.isEmpty()) {
             LOG.warnf("%s %s: inbound entry not found, exiting as a no-op", job, uploadId);
             return Optional.empty();
         }
         IngestionLogContext.tenant(located.get().batch().tenantId());
+        int stored = located.get().entry().attempt();
+        if (stored != attempt) {
+            LOG.infof(
+                    "%s %s upload %s: request is for attempt %d, entry is at attempt %d, exiting as a no-op",
+                    job, located.get().batch().id(), uploadId, attempt, stored);
+            return Optional.empty();
+        }
         InboundFileState state = located.get().entry().state();
         if (!expected.contains(state)) {
             LOG.infof(

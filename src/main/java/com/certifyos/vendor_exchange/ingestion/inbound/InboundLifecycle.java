@@ -7,6 +7,7 @@ import com.certifyos.vendor_exchange.audit.AuditRepository;
 import com.certifyos.vendor_exchange.clients.ArchiveStore;
 import com.certifyos.vendor_exchange.clients.FileIngestionCounts;
 import com.certifyos.vendor_exchange.export.batch.ExportBatch;
+import com.certifyos.vendor_exchange.export.jobs.JobLogContext;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
 import com.certifyos.vendor_exchange.persistence.Ids;
@@ -20,12 +21,14 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
+import org.jboss.logging.MDC;
 
 /**
  * The one place that moves an {@code inboundFiles[]} entry. Each method is one transaction: the
  * guarded write on the entry and its audit event, nothing else (no enqueue, no HTTP). Metrics and
  * logs follow the commit. A guarded write that finds the entry moved returns false and writes
- * nothing, so a stale job or a late event is a no-op its caller can see.
+ * nothing, so a stale job or a late event is a no-op its caller can see. Two exceptions: {@link
+ * #claimIn} joins the caller's transaction, and {@link #envelope} only builds an event.
  */
 @ApplicationScoped
 public class InboundLifecycle {
@@ -428,8 +431,10 @@ public class InboundLifecycle {
 
     /**
      * The envelope every inbound file event shares: tenant, vendor, batch, the entry's attempt, the
-     * upload and the actor. The caller adds {@code occurredAt} and the details; an export event
-     * resets the attempt to the batch's.
+     * upload, the actor, and the job that writes it when one runs on this thread (its id is on the
+     * MDC under the key {@code IngestionLogContext} and {@code JobLogContext} share; an HTTP path has
+     * none). The caller adds {@code occurredAt} and the details; an export event resets the attempt
+     * to the batch's.
      *
      * @param type the event type
      * @param batch the batch the entry is on
@@ -438,8 +443,14 @@ public class InboundLifecycle {
      * @return the builder
      */
     public static AuditEvent.Builder envelope(AuditEventType type, ExportBatch batch, InboundFile entry, String actor) {
-        return AuditEvent.forBatch(type, batch.tenantId(), batch.vendor(), batch.id(), entry.attempt())
+        AuditEvent.Builder builder = AuditEvent.forBatch(
+                        type, batch.tenantId(), batch.vendor(), batch.id(), entry.attempt())
                 .upload(entry.uploadId())
                 .actor(actor);
+        Object jobId = MDC.get(JobLogContext.JOB_ID);
+        if (jobId != null) {
+            builder.jobId(jobId.toString());
+        }
+        return builder;
     }
 }

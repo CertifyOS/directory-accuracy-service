@@ -22,6 +22,7 @@ import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
 import com.github.tomakehurst.wiremock.client.WireMock;
+import com.github.tomakehurst.wiremock.http.Fault;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import io.quarkus.test.InjectMock;
@@ -30,6 +31,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.quarkus.test.junit.mockito.InjectSpy;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import java.time.Duration;
 import java.time.Instant;
@@ -289,6 +291,52 @@ class RequestIngestionJobIT {
                         .withRequestBody(WireMock.equalToJson(designBody(seeded))));
         assertRequested(seeded, "ing-reqing-retry");
         Assertions.assertEquals(List.of(AuditEventType.INBOUND_FILE_INGESTION_REQUESTED), types(since(seeded, before)));
+    }
+
+    @Test
+    void rerunFromArchivingWithoutArchivePathCopiesAgainAsAlreadyPresent() {
+        // The first run's copy landed, then the worker died before archived committed.
+        Seeded seeded = seed("reqing-copied", InboundFileState.ARCHIVING);
+        Assertions.assertNull(seeded.entry().archivePath());
+        archiveCopies(seeded, true);
+        stubRegister(seeded, 201, "{\"ingestionId\":\"ing-reqing-copied\",\"status\":\"RECEIVED\"}");
+        int before = trail(seeded).size();
+
+        run(seeded);
+
+        Mockito.verify(archive, Mockito.times(1))
+                .copy(
+                        InboundFixtures.VENDOR_BUCKET,
+                        seeded.entry().objectName(),
+                        1760520000123456L,
+                        ARCHIVE_BUCKET,
+                        archiveObject(seeded));
+        assertRequested(seeded, "ing-reqing-copied");
+        List<AuditEvent> events = since(seeded, before);
+        Assertions.assertEquals(
+                List.of(AuditEventType.INBOUND_FILE_ARCHIVED, AuditEventType.INBOUND_FILE_INGESTION_REQUESTED),
+                types(events));
+        Assertions.assertEquals("ALREADY_PRESENT", events.get(0).detail().get("copyResult"));
+    }
+
+    @Test
+    void registerConnectionFailurePropagatesWithTheEntryStillArchiving() {
+        Seeded seeded = seed("reqing-timeout", InboundFileState.RECEIVED);
+        archiveCopies(seeded, false);
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(REGISTER))
+                .withRequestBody(WireMock.matchingJsonPath("$.externalRef", WireMock.equalTo(externalRef(seeded))))
+                .willReturn(WireMock.aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+
+        Assertions.assertThrows(ProcessingException.class, () -> run(seeded));
+
+        InboundFile after = entry(seeded);
+        Assertions.assertEquals(InboundFileState.ARCHIVING, after.state(), "left for the JobRunr retry");
+        Assertions.assertEquals(archivePath(seeded), after.archivePath(), "the archive is kept");
+        Assertions.assertNull(after.failedStep());
+        Assertions.assertThrows(
+                org.jobrunr.storage.JobNotFoundException.class,
+                () -> storage.getJobById(deadlineId(seeded)),
+                "no deadline check before a register answer");
     }
 
     @Test

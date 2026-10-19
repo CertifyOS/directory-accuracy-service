@@ -23,7 +23,11 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
  * request + {@code ingestionDeadlineHours}, ask file-ingestion once. A finished parse moves the entry
  * to {@code PARSED} ({@code completionSource = DEADLINE}), an invalid file to {@code
  * INGESTION_FAILED}, anything else fails the entry. Only runs while the entry is {@code
- * INGESTION_REQUESTED}; file-ingestion errors propagate for JobRunr's retry.
+ * INGESTION_REQUESTED}; file-ingestion errors propagate for JobRunr's retry. An entry still in
+ * {@code ARCHIVING} throws for a retry too: the request job schedules this check before it commits
+ * {@code INGESTION_REQUESTED}, and a rerun of the request job schedules under the same id, which
+ * JobRunr keeps, so a no-op here could leave the committed entry with no pending check. Every other
+ * state exits as a no-op.
  */
 @ApplicationScoped
 public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDeadlineCheckJobRequest> {
@@ -38,7 +42,8 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
     static final String PARTIAL = "PARTIAL";
     static final String INVALID = "INVALID";
 
-    private static final Set<InboundFileState> EXPECTED = EnumSet.of(InboundFileState.INGESTION_REQUESTED);
+    private static final Set<InboundFileState> EXPECTED =
+            EnumSet.of(InboundFileState.INGESTION_REQUESTED, InboundFileState.ARCHIVING);
     private static final Logger LOG = Logger.getLogger(IngestionDeadlineCheckJob.class);
 
     private final InboundJobSupport support;
@@ -73,9 +78,13 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
                 throw new IllegalStateException(
                         "service disabled; ingestion deadline check " + request + " deferred to a retry");
             }
-            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), EXPECTED);
+            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), request.attempt(), EXPECTED);
             if (loaded.isEmpty()) {
                 return;
+            }
+            if (loaded.get().entry().state() == InboundFileState.ARCHIVING) {
+                throw new IllegalStateException("ingestion deadline check " + request
+                        + " found the entry still ARCHIVING; the request job has not committed, retrying");
             }
             check(loaded.get(), InboundJobSupport.jobAttempts(job));
         }

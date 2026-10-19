@@ -105,7 +105,7 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
                 throw new IllegalStateException(
                         "service disabled; request ingestion " + request + " deferred to a retry");
             }
-            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), EXPECTED);
+            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), request.attempt(), EXPECTED);
             if (loaded.isEmpty()) {
                 return;
             }
@@ -154,11 +154,11 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
         }
         Instant now = clock.instant();
         Instant deadlineAt = now.plus(Duration.ofHours(cfg.ingestion().ingestionDeadlineHours()));
-        // Schedule before the commit. A worker death between the two leaves a deadline check that
-        // finds the entry still ARCHIVING and exits as a no-op, while JobRunr reruns this job; the
-        // rerun schedules the same id (JobRunr keeps the existing job) and then commits. The other
-        // order would leave an INGESTION_REQUESTED entry, which only its deadline check moves,
-        // with no check scheduled.
+        // Schedule before the commit. A worker death between the two leaves a deadline check that,
+        // should it fire first, finds the entry still ARCHIVING and throws for a JobRunr retry,
+        // while JobRunr reruns this job; the rerun schedules the same id (JobRunr keeps the existing
+        // job) and then commits. The other order would leave an INGESTION_REQUESTED entry, which
+        // only its deadline check moves, with no check scheduled.
         UUID deadlineJobId = enqueuer.deadlineCheck(batch.id(), entry.uploadId(), entry.attempt(), deadlineAt);
         boolean moved = lifecycle.ingestionRequested(
                 located,
