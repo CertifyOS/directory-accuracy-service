@@ -6,12 +6,14 @@ import com.certifyos.vendor_exchange.export.jobs.JobLogContext;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
+import com.certifyos.vendor_exchange.ingestion.staging.StagingLifecycle;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 import org.jobrunr.jobs.annotations.Job;
@@ -21,8 +23,9 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
 /**
  * The fallback of design step 4: when file-ingestion's completion event has not moved the entry by
  * request + {@code ingestionDeadlineHours}, ask file-ingestion once. A finished parse moves the entry
- * to {@code PARSED} ({@code completionSource = DEADLINE}), an invalid file to {@code
- * INGESTION_FAILED}, anything else fails the entry. Only runs while the entry is {@code
+ * to {@code PARSED} ({@code completionSource = DEADLINE}) and, after that commit, enqueues the
+ * stage-rows job and records it as the entry's job; an invalid file moves to {@code
+ * INGESTION_FAILED}; anything else fails the entry. Only runs while the entry is {@code
  * INGESTION_REQUESTED}; file-ingestion errors propagate for JobRunr's retry. An entry still in
  * {@code ARCHIVING} throws for a retry too: the request job schedules this check before it commits
  * {@code INGESTION_REQUESTED}, and a rerun of the request job schedules under the same id, which
@@ -48,17 +51,23 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
 
     private final InboundJobSupport support;
     private final InboundLifecycle lifecycle;
+    private final StagingLifecycle stagingLifecycle;
     private final FileIngestionClient fileIngestion;
+    private final IngestionJobEnqueuer enqueuer;
     private final Clock clock;
 
     public IngestionDeadlineCheckJob(
             InboundJobSupport support,
             InboundLifecycle lifecycle,
+            StagingLifecycle stagingLifecycle,
             @RestClient FileIngestionClient fileIngestion,
+            IngestionJobEnqueuer enqueuer,
             Clock clock) {
         this.support = support;
         this.lifecycle = lifecycle;
+        this.stagingLifecycle = stagingLifecycle;
         this.fileIngestion = fileIngestion;
+        this.enqueuer = enqueuer;
         this.clock = clock;
     }
 
@@ -104,8 +113,9 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
                 found);
         Instant now = clock.instant();
         if (COMPLETED.equals(found) || PARTIAL.equals(found)) {
-            // The staging enqueue follows this move once the stage job exists (plan Task 3.5).
-            lifecycle.parsed(located, status.counts(), found, DEADLINE, now);
+            if (lifecycle.parsed(located, status.counts(), found, DEADLINE, now)) {
+                handToStaging(located);
+            }
             return;
         }
         if (INVALID.equals(found)) {
@@ -115,5 +125,17 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
         }
         lifecycle.failed(
                 located, InboundFileState.INGESTION_REQUESTED, STEP_PARSE, DID_NOT_FINISH, found, attempts, now);
+    }
+
+    /**
+     * After the {@code PARSED} commit: enqueue the stage job, then record it on the entry. A stage job
+     * that has already moved the entry to {@code STAGING} leaves the job id unrecorded, which is logged.
+     */
+    private void handToStaging(Located located) {
+        UUID stageJobId = enqueuer.stageRows(
+                located.batch().id(),
+                located.entry().uploadId(),
+                located.entry().attempt());
+        stagingLifecycle.jobRecorded(located, stageJobId, clock.instant());
     }
 }
