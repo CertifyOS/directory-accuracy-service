@@ -23,6 +23,7 @@ import org.bson.conversions.Bson;
 public class UnmatchedUploadRepository {
 
     private static final String RESOLUTION = "resolution";
+    private static final String RESOLUTION_KIND = RESOLUTION + ".kind";
 
     private final Collections collections;
 
@@ -76,8 +77,10 @@ public class UnmatchedUploadRepository {
         if (limit < 1) {
             throw new IllegalArgumentException("limit must be at least 1, got " + limit);
         }
-        Bson open = Filters.exists(RESOLUTION, false);
-        Bson filter = folderTenant == null ? open : Filters.and(open, Filters.eq("folderTenant", folderTenant));
+        // resolution.kind null matches a row with no resolution: one equality, so the tenant list runs
+        // on unmatched_open_by_tenant and the service-wide one on unmatched_resolution.
+        Bson open = Filters.eq(RESOLUTION_KIND, null);
+        Bson filter = folderTenant == null ? open : Filters.and(Filters.eq("folderTenant", folderTenant), open);
         List<UnmatchedUpload> found = new ArrayList<>();
         for (Document doc : collections
                 .unmatchedUploads()
@@ -114,6 +117,6 @@ public class UnmatchedUploadRepository {
      * @return the number of unresolved rows
      */
     public long countOpen() {
-        return collections.unmatchedUploads().countDocuments(Filters.exists(RESOLUTION, false));
+        return collections.unmatchedUploads().countDocuments(Filters.eq(RESOLUTION_KIND, null));
     }
 }

@@ -231,7 +231,8 @@ paths:
       description: "Pub/Sub push endpoint for object notifications under the vendor\
         \ bucket. Requires the subscription's OIDC identity token; reads the message\
         \ attributes only and answers 204 to acknowledge every outcome, including\
-        \ an event it ignores or cannot match."
+        \ an event it ignores or cannot match; answers 503 while the service is switched\
+        \ off so the message is redelivered."
       tags:
       - internal
       requestBody:
@@ -243,6 +244,13 @@ paths:
       responses:
         "204":
           description: Acknowledged
+        "503":
+          description: The service is switched off (SERVICE_DISABLED); Pub/Sub redelivers
+            the message
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
             \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
@@ -1199,7 +1207,7 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "409":
           description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
-            \ ALREADY_CLAIMED)"
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
           content:
             application/problem+json:
               schema:
@@ -1250,7 +1258,7 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "409":
           description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
-            \ ALREADY_CLAIMED)"
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
           content:
             application/problem+json:
               schema:
@@ -1309,7 +1317,7 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "409":
           description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
-            \ ALREADY_CLAIMED)"
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
           content:
             application/problem+json:
               schema:
@@ -1372,7 +1380,7 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "409":
           description: "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED,\
-            \ ALREADY_CLAIMED)"
+            \ ALREADY_CLAIMED), or the file names another tenant (TENANT_MISMATCH)"
           content:
             application/problem+json:
               schema:
