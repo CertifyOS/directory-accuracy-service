@@ -111,6 +111,26 @@ public class InboundFileRepository {
     }
 
     /**
+     * The batch's first entry, read in the caller's transaction. {@link #claim} only ever pushes, so
+     * element 0 is the upload that was claimed {@code RECEIVED}; a duplicate's audit event names it.
+     *
+     * @param session the transaction the claim ran in
+     * @param exportBatchId the batch
+     * @return the first entry, or empty when the batch does not exist or has no entry
+     */
+    public Optional<InboundFile> firstEntry(ClientSession session, String exportBatchId) {
+        Document batch = collections
+                .batches()
+                .find(session, Filters.eq("_id", exportBatchId))
+                .projection(Projections.include(FIELD))
+                .first();
+        if (batch == null) {
+            return Optional.empty();
+        }
+        return entriesOf(batch).stream().findFirst().map(InboundFile::fromDocument);
+    }
+
+    /**
      * The entry for an upload id, for the storage event handler and operator reads, on the
      * {@code batches_inbound_upload_id} index.
      *
