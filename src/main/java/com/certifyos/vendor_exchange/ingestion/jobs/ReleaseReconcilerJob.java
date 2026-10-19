@@ -22,8 +22,10 @@ import org.jobrunr.jobs.annotations.Recurring;
  * process that died in between) would otherwise leave them with no job: a repeated request answers
  * {@code RELEASE_NOT_ALLOWED} and a rollback is refused. A release waiting for another one is put back
  * every minute and so never stale; a release whose own job JobRunr still holds as waiting, due or
- * running is left alone. The job is enqueued under {@code release:<releaseId>:reconciled:<second>}
- * and claims the fields itself, so a re-enqueue that loses a race is a no-op. Each re-enqueue is one
+ * running is left alone, and so is one whose job an earlier pass enqueued: each pass touches the
+ * fields' {@code updatedAt} with its own time and enqueues under {@code
+ * release:<releaseId>:reconciled:<that second>}, so the next pass reads that id back from {@code
+ * updatedAt} and finds it pending. Two jobs never claim one release at once. Each re-enqueue is one
  * {@value #REENQUEUED_PREFIX} warning line.
  */
 @ApplicationScoped
@@ -78,6 +80,7 @@ public class ReleaseReconcilerJob {
         Instant now = clock.instant();
         Instant before = now.minus(Duration.ofMinutes(cfg.ingestion().inboundStaleMinutes()));
         Map<String, ReleaseJobRequest> stuck = new LinkedHashMap<>();
+        Map<String, Instant> lastTouched = new LinkedHashMap<>();
         for (FieldRecommendation field : releaseFields.staleRequested(before, STALE_LIMIT)) {
             String releaseId = field.goldenRecordUpdate() == null
                     ? null
@@ -87,15 +90,18 @@ public class ReleaseReconcilerJob {
                         releaseId,
                         new ReleaseJobRequest(
                                 field.tenantId(), field.practitioner().certifyPractitionerId(), releaseId));
+                lastTouched.putIfAbsent(releaseId, field.updatedAt());
             }
         }
         List<UUID> enqueued = new ArrayList<>();
         for (ReleaseJobRequest request : stuck.values()) {
-            String own = IngestionJobEnqueuer.releaseJobId(request.releaseId()).toString();
-            if (enqueuer.isPending(own, ReleaseJob.class)) {
-                LOG.infof("release reconciler: release %s still has its job pending", request.releaseId());
+            if (pending(request.releaseId(), lastTouched.get(request.releaseId()))) {
+                LOG.infof("release reconciler: release %s still has a job pending", request.releaseId());
                 continue;
             }
+            // Touch first: the fields' updatedAt names this pass, so a later pass finds the job it
+            // enqueues by the same id and leaves it alone while JobRunr holds it.
+            releaseFields.touchRequested(request.tenantId(), request.releaseId(), now);
             UUID id = enqueuer.releaseReconciled(request, now);
             enqueued.add(id);
             LOG.warnf(
@@ -103,5 +109,20 @@ public class ReleaseReconcilerJob {
                     REENQUEUED_PREFIX, request.tenantId(), request.releaseId(), request.certifyPractitionerId(), id);
         }
         return enqueued;
+    }
+
+    /**
+     * Whether a job of the release is still waiting, due or running: the request's own job, or the one
+     * an earlier pass enqueued, whose id is keyed on the second that pass touched the fields.
+     */
+    private boolean pending(String releaseId, Instant touched) {
+        if (enqueuer.isPending(IngestionJobEnqueuer.releaseJobId(releaseId).toString(), ReleaseJob.class)) {
+            return true;
+        }
+        return touched != null
+                && enqueuer.isPending(
+                        IngestionJobEnqueuer.releaseReconciledId(releaseId, touched)
+                                .toString(),
+                        ReleaseJob.class);
     }
 }

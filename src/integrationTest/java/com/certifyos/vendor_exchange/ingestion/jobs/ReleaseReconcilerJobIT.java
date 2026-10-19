@@ -4,6 +4,7 @@ import com.certifyos.vendor_exchange.ApiTestProfile;
 import com.certifyos.vendor_exchange.MongoResource;
 import com.certifyos.vendor_exchange.ingestion.release.ReleaseFixtures;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation;
+import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.vendor_exchange.ingestion.staging.ReviewStatus;
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.mongodb.client.model.Filters;
@@ -38,6 +39,9 @@ class ReleaseReconcilerJobIT {
 
     @Inject
     StorageProvider storage;
+
+    @Inject
+    FieldRecommendationRepository repository;
 
     private static FieldRecommendation requested(String tenant, String practitionerId, String field, String releaseId) {
         return ReleaseFixtures.field(
@@ -74,7 +78,25 @@ class ReleaseReconcilerJobIT {
         Assertions.assertEquals(StateName.ENQUEUED, job.getState());
         Assertions.assertEquals(ReleaseJob.class.getName(), job.getJobDetails().getClassName());
         Assertions.assertNull(find("rel-rr-fresh", before, after), "a fresh request is left to its own job");
+
+        Instant touched =
+                repository.find(tenant, docs.get(0).id()).orElseThrow().updatedAt();
+        Assertions.assertEquals(
+                stranded,
+                IngestionJobEnqueuer.releaseReconciledId("rel-rr-stranded", touched),
+                "the pass touched the fields with the second its job id is keyed on");
+        List<UUID> again = reconciler.run();
+        Assertions.assertTrue(
+                again.stream().noneMatch(id -> id.equals(stranded) || isRelease(id, "rel-rr-stranded")),
+                "a second pass does not stack another job for the release");
         enqueued.forEach(storage::deletePermanently);
+        again.forEach(storage::deletePermanently);
+    }
+
+    private boolean isRelease(UUID id, String releaseId) {
+        Job job = storage.getJobById(id);
+        return job.getJobDetails().getJobParameters().stream()
+                .anyMatch(parameter -> String.valueOf(parameter.getObject()).contains(releaseId));
     }
 
     private UUID find(String releaseId, Instant before, Instant after) {

@@ -168,6 +168,26 @@ public class ReleaseFieldRepository {
     }
 
     /**
+     * Sets {@code updatedAt} on a release's {@code RELEASE_REQUESTED} fields, for the release
+     * reconciler, whose re-enqueued job id is keyed on that time. No state or version change.
+     *
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param now the reconciler's pass time
+     * @return how many fields were touched
+     */
+    public long touchRequested(String tenantId, String releaseId, Instant now) {
+        return recommendations()
+                .updateMany(
+                        Filters.and(
+                                Filters.eq("tenantId", tenantId),
+                                Filters.eq("goldenRecordUpdate.releaseId", releaseId),
+                                Filters.eq("reviewStatus", ReviewStatus.RELEASE_REQUESTED.name())),
+                        Updates.set("updatedAt", now))
+                .getModifiedCount();
+    }
+
+    /**
      * Records the DAL write on some {@code RELEASING} fields of a release: the caller's {@code $set}s
      * on {@code goldenRecordUpdate}, {@code updatedAt}, and the version bump every write makes. No
      * state change and no event (the release job's {@code written} step).

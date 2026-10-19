@@ -137,13 +137,17 @@ class ReleaseJobIT {
     }
 
     /**
-     * Asserts that a waiting release scheduled its job again ({@link ReleaseJob#WAIT} after a moment
-     * between {@code before} and {@code after}) instead of failing, then deletes that job so it does not
+     * Asserts that a waiting release scheduled its job again ({@link ReleaseJob#WAIT} plus up to {@link
+     * ReleaseJob#WAIT_JITTER} after a moment between {@code before} and {@code after}) instead of failing, then deletes that job so it does not
      * run after the test.
      */
     private void removeWaitJob(String releaseId, Instant before, Instant after) {
         for (long second = before.plus(ReleaseJob.WAIT).getEpochSecond();
-                second <= after.plus(ReleaseJob.WAIT).getEpochSecond();
+                second
+                        <= after.plus(ReleaseJob.WAIT)
+                                        .plus(ReleaseJob.WAIT_JITTER)
+                                        .getEpochSecond()
+                                + 1;
                 second++) {
             UUID id = IngestionJobEnqueuer.releaseWaitId(releaseId, Instant.ofEpochSecond(second));
             try {

@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -69,6 +70,12 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
 
     /** How long a release waits for another release on its practitioner or location before trying again. */
     static final Duration WAIT = Duration.ofMinutes(1);
+
+    /**
+     * Up to this much is added to {@link #WAIT}, drawn at random per wait: releases that saw each other
+     * at one location both back off, and the same delay would bring them back to claim together again.
+     */
+    static final Duration WAIT_JITTER = Duration.ofSeconds(90);
 
     /** The DAL answers that refuse the batch itself; every other 4xx is operational and retried. */
     static final Set<Integer> REFUSALS = Set.of(400, 422);
@@ -145,7 +152,9 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
                 // Waiting for another release is not a failure: the claim put this release's fields back
                 // to RELEASE_REQUESTED, and a new job runs it later with JobRunr's retries untouched, so a
                 // long read-back never exhausts them into RELEASE_FAILED.
-                Instant at = clock.instant().plus(WAIT);
+                Instant at = clock.instant()
+                        .plus(WAIT)
+                        .plusMillis(ThreadLocalRandom.current().nextLong(WAIT_JITTER.toMillis() + 1));
                 UUID again = enqueuer.releaseAgain(request, at);
                 LOG.infof("%s; scheduled again at %s as job %s", waiting.getMessage(), at, again);
             }
