@@ -218,8 +218,7 @@ class DalClientsIT {
     void practitionerAndLocationOvRead() {
         // DAL practitioner_operational_value.resource.dto.PractitionerOVResponse; crosswalks is left
         // out when null. contributionMap is present only because includeLineage=true was asked for.
-        // Open: the DAL sends contributingSlices as slice id strings; these stubs keep the object
-        // entries OperationalValue reads today until the element type is ruled on.
+        // contributingSlices is the contributing slices' ids, as strings.
         WireMockDal.stubFor(
                 WireMock.get(WireMock.urlPathEqualTo("/practitioners/ov/cert-1"))
                         .withQueryParam("includeLineage", WireMock.equalTo("true"))
@@ -228,7 +227,7 @@ class DalClientsIT {
                                         """
                         {"certifyId": "cert-1", "tenantId": "org-a",
                          "data": {"first_name": "Ann", "last_name": "Lee"},
-                         "contributingSlices": [{"sourceType": "candor:org-a", "crosswalkId": "cert-1"}],
+                         "contributingSlices": ["cert-1", "cert-2"],
                          "contributionMap": {"first_name": "candor:org-a"},
                          "credentialingStatus": null, "nextCredentialingDate": null, "credentialingDueDate": null}
                         """)));
@@ -240,7 +239,7 @@ class DalClientsIT {
                                 WireMock.okJson(
                                         """
                         {"certifyLocationId": "loc-1", "tenantId": "org-a",
-                         "data": {"address_line_1": "1 Main St"}, "contributingSlices": [],
+                         "data": {"address_line_1": "1 Main St"}, "contributingSlices": ["cert-loc-1"],
                          "contributionMap": {"address_line_1": "candor:org-a"}}
                         """)));
 
@@ -249,12 +248,11 @@ class DalClientsIT {
 
         Assertions.assertEquals("cert-1", practitioner.certifyId());
         Assertions.assertEquals("Lee", practitioner.data().get("last_name"));
-        Assertions.assertEquals(
-                List.of(Map.of("sourceType", SOURCE_TYPE, "crosswalkId", "cert-1")), practitioner.contributingSlices());
+        Assertions.assertEquals(List.of("cert-1", "cert-2"), practitioner.contributingSlices());
         Assertions.assertEquals(Map.of("first_name", SOURCE_TYPE), practitioner.contributionMap());
         Assertions.assertEquals("loc-1", location.certifyId(), "read from certifyLocationId");
         Assertions.assertEquals("1 Main St", location.data().get("address_line_1"));
-        Assertions.assertEquals(List.of(), location.contributingSlices());
+        Assertions.assertEquals(List.of("cert-loc-1"), location.contributingSlices());
         Assertions.assertEquals(Map.of("address_line_1", SOURCE_TYPE), location.contributionMap());
         WireMockDal.verify(
                 1,
