@@ -41,6 +41,13 @@ public class IngestionJobEnqueuer {
         return id;
     }
 
+    /** Enqueues the stage-rows job for a parsed upload attempt and returns its id. */
+    public UUID stageRows(String exportBatchId, String uploadId, int attempt) {
+        UUID id = JobIds.of(StageRowsJob.NAME, uploadId, attempt);
+        scheduler.enqueue(id, new StageRowsJobRequest(exportBatchId, uploadId, attempt));
+        return id;
+    }
+
     /** Schedules the ingestion deadline check at {@code at} and returns its id. */
     public UUID deadlineCheck(String exportBatchId, String uploadId, int attempt, Instant at) {
         UUID id = deadlineCheckId(uploadId, attempt);
