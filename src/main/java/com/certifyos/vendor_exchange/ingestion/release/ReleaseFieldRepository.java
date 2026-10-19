@@ -11,7 +11,9 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -20,10 +22,10 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 
 /**
- * The release lane's own reads of {@code field_recommendations}, beside the staging repository's
- * moves ({@code decide}, {@code moveAll}, {@code countReleasing}), which this lane also uses. Kept
- * here so the staging repository stays within its size and the release queries sit with their only
- * caller. Every read takes the tenant and carries a limit.
+ * The release lane's own reads of {@code field_recommendations} and its one write mark, beside the
+ * staging repository's moves ({@code decide}, {@code moveAll}, {@code countReleasing}), which this
+ * lane also uses. Kept here so the staging repository stays within its size and the release queries
+ * sit with their only caller. Every read takes the tenant and carries a limit.
  */
 @ApplicationScoped
 public class ReleaseFieldRepository {
@@ -112,6 +114,33 @@ public class ReleaseFieldRepository {
                         entity,
                         Filters.eq("reviewStatus", ReviewStatus.RELEASING.name())),
                 limit);
+    }
+
+    /**
+     * Records the DAL write on some {@code RELEASING} fields of a release: the caller's {@code $set}s
+     * on {@code goldenRecordUpdate}, {@code updatedAt}, and the version bump every write makes. No
+     * state change and no event (the release job's {@code written} step).
+     *
+     * @param session the transaction
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param ids the fields one slice write covered
+     * @param sets the {@code goldenRecordUpdate.*} values
+     * @param now the write time
+     * @return how many fields were marked
+     */
+    public long markWritten(
+            ClientSession session, String tenantId, String releaseId, List<String> ids, Bson sets, Instant now) {
+        return recommendations()
+                .updateMany(
+                        session,
+                        Filters.and(
+                                Filters.in("_id", ids),
+                                Filters.eq("tenantId", tenantId),
+                                Filters.eq("goldenRecordUpdate.releaseId", releaseId),
+                                Filters.eq("reviewStatus", ReviewStatus.RELEASING.name())),
+                        Updates.combine(sets, Updates.set("updatedAt", now), Updates.inc("version", 1L)))
+                .getModifiedCount();
     }
 
     List<FieldRecommendation> read(Bson filter, int limit) {

@@ -21,6 +21,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
 import org.jboss.logging.MDC;
@@ -42,7 +44,14 @@ public class ReleaseLifecycle {
     private static final Logger LOG = Logger.getLogger(ReleaseLifecycle.class);
     private static final ReadBack.Verdict UNKNOWN = new ReadBack.Verdict(ReadBack.Outcome.UNKNOWN, null);
 
+    /** The most of a failure's text kept on the field document. */
+    static final int ERROR_MAX = 500;
+
+    private static final Set<ReviewStatus> FAILABLE =
+            EnumSet.of(ReviewStatus.RELEASE_REQUESTED, ReviewStatus.RELEASING);
+
     private final FieldRecommendationRepository fields;
+    private final ReleaseFieldRepository releaseFields;
     private final AuditRepository audit;
     private final Transactions transactions;
     private final VendorExchangeMetrics metrics;
@@ -50,15 +59,159 @@ public class ReleaseLifecycle {
 
     public ReleaseLifecycle(
             FieldRecommendationRepository fields,
+            ReleaseFieldRepository releaseFields,
             AuditRepository audit,
             Transactions transactions,
             VendorExchangeMetrics metrics,
             VendorExchangeConfig cfg) {
         this.fields = fields;
+        this.releaseFields = releaseFields;
         this.audit = audit;
         this.transactions = transactions;
         this.metrics = metrics;
         this.cfg = cfg;
+    }
+
+    /**
+     * One slice write of a release and the fields it carried.
+     *
+     * @param fieldRecommendationIds the fields
+     * @param resource the DAL resource ({@code CorePractitioner} or {@code CoreLocation})
+     * @param crosswalkId the slice's crosswalk id
+     * @param sliceId the certify id of the slice written
+     */
+    public record Write(List<String> fieldRecommendationIds, String resource, String crosswalkId, String sliceId) {
+        public Write {
+            fieldRecommendationIds = List.copyOf(fieldRecommendationIds);
+        }
+    }
+
+    /**
+     * Records the DAL write on the release's {@code RELEASING} fields: {@code goldenRecordUpdate.resource},
+     * {@code crosswalkId}, {@code sliceId}, {@code writtenAt} and {@code deadlineJobId}, in one
+     * transaction, no event. The fields stay {@code RELEASING} until the read-back.
+     *
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param writes each slice write and its fields
+     * @param writtenAt when the DAL accepted the batch
+     * @param deadlineJobId the read-back deadline the job schedules next
+     */
+    public void written(String tenantId, String releaseId, List<Write> writes, Instant writtenAt, UUID deadlineJobId) {
+        long marked = transactions.run(session -> {
+            long count = 0;
+            for (Write write : writes) {
+                count += releaseFields.markWritten(
+                        session,
+                        tenantId,
+                        releaseId,
+                        write.fieldRecommendationIds(),
+                        Updates.combine(
+                                Updates.set("goldenRecordUpdate.resource", write.resource()),
+                                Updates.set("goldenRecordUpdate.crosswalkId", write.crosswalkId()),
+                                Updates.set("goldenRecordUpdate.sliceId", write.sliceId()),
+                                Updates.set("goldenRecordUpdate.writtenAt", writtenAt),
+                                Updates.set("goldenRecordUpdate.deadlineJobId", deadlineJobId.toString())),
+                        writtenAt);
+            }
+            return count;
+        });
+        LOG.infof("release %s: %d field(s) written in %d slice write(s)", releaseId, marked, writes.size());
+    }
+
+    /**
+     * Fails a release from the job: see {@link #failed(String, String, String, String, boolean, int,
+     * Instant, String)}, with the job id from the log context.
+     */
+    public int failed(
+            String tenantId,
+            String releaseId,
+            String reason,
+            String error,
+            boolean backToApproved,
+            int jobAttempts,
+            Instant now) {
+        return failed(tenantId, releaseId, reason, error, backToApproved, jobAttempts, now, currentJobId());
+    }
+
+    /**
+     * Fails a release: its {@code RELEASE_REQUESTED} and {@code RELEASING} fields go back to {@code
+     * APPROVED} (a refusal a reviewer can retry after a fix: {@code RANKING_MISSING}, {@code
+     * UNKNOWN_ENTITY}, {@code NAME_SOUND_CHANGED}, {@code DAL_REJECTED}) or to {@code RELEASE_FAILED}
+     * ({@code EXHAUSTED}), each with {@code FIELD_RELEASE_FAILED}, in one transaction. The full text is
+     * kept on the document as {@code goldenRecordUpdate.error}; the event carries only its first part
+     * (the reason and, for a DAL refusal, the HTTP status), since a DAL error body can echo a value.
+     *
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param reason the stable reason
+     * @param error what went wrong, or null
+     * @param backToApproved true for a refusal, false for an exhausted job
+     * @param jobAttempts how many times the job ran
+     * @param now the write time
+     * @param jobId the JobRunr job, or null
+     * @return how many fields moved
+     */
+    public int failed(
+            String tenantId,
+            String releaseId,
+            String reason,
+            String error,
+            boolean backToApproved,
+            int jobAttempts,
+            Instant now,
+            String jobId) {
+        List<FieldRecommendation> open =
+                fields.forRelease(tenantId, releaseId, cfg.ingestion().releaseBulkMax()).stream()
+                        .filter(field -> FAILABLE.contains(field.reviewStatus()))
+                        .toList();
+        ReviewStatus to = backToApproved ? ReviewStatus.APPROVED : ReviewStatus.RELEASE_FAILED;
+        String text = cut(error == null || error.isBlank() ? reason : reason + ": " + error);
+        String summary = summary(text);
+        int moved = transactions.run(session -> {
+            int count = 0;
+            for (FieldRecommendation field : open) {
+                if (fields.decide(
+                        session,
+                        tenantId,
+                        field.id(),
+                        field.version(),
+                        FAILABLE,
+                        to,
+                        Updates.set("goldenRecordUpdate.error", text),
+                        now)) {
+                    audit.write(
+                            session,
+                            ReleaseService.event(AuditEventType.FIELD_RELEASE_FAILED, field, Actors.INGESTION, now)
+                                    .release(releaseId)
+                                    .jobId(jobId)
+                                    .detail("reason", reason)
+                                    .detail("error", summary)
+                                    .detail("jobAttempts", jobAttempts)
+                                    .detail("field", field.field())
+                                    .build());
+                    count++;
+                }
+            }
+            return count;
+        });
+        if (moved > 0) {
+            metrics.releaseJob(tenantId, "RELEASE_FAILED");
+            metrics.releaseFailedReason(reason);
+        }
+        LOG.warnf("release %s: %d field(s) moved to %s, reason %s", releaseId, moved, to, reason);
+        return moved;
+    }
+
+    /** The text before the second {@code :}, which holds the reason and a status, never a DAL body. */
+    static String summary(String text) {
+        int first = text.indexOf(':');
+        int second = first < 0 ? -1 : text.indexOf(':', first + 1);
+        return second < 0 ? text : text.substring(0, second);
+    }
+
+    private static String cut(String text) {
+        return text.length() <= ERROR_MAX ? text : text.substring(0, ERROR_MAX);
     }
 
     /**

@@ -208,6 +208,33 @@ public final class SliceMerge {
         return copy;
     }
 
+    /**
+     * The location slice's crosswalk id for a Golden location: its name and service address.
+     *
+     * @param goldenLocation the location's operational value
+     * @param goldenServiceAddress the service address, from {@link #serviceAddress}
+     * @return {@link Crosswalks#location}
+     */
+    public static String locationCrosswalk(OperationalValue goldenLocation, Map<String, Object> goldenServiceAddress) {
+        return Crosswalks.location(text(goldenLocation.data(), NAME, NAME), goldenServiceAddress);
+    }
+
+    /**
+     * The Golden practitioner's first name, last name or NPI (provisional key shapes, see the class
+     * comment).
+     *
+     * @param golden the practitioner's operational value
+     * @param field {@code first_name}, {@code last_name} or {@code npi}
+     * @return the value, or null when absent
+     */
+    public static String practitionerValue(OperationalValue golden, String field) {
+        return switch (field) {
+            case "first_name" -> text(golden.data(), FIRST_NAME, field);
+            case "last_name" -> text(golden.data(), LAST_NAME, field);
+            default -> text(golden.data(), field, field);
+        };
+    }
+
     /** A Golden value read under its camel-case key, else its snake-case one. */
     static String text(Map<String, Object> data, String key, String fallback) {
         Object value = data.get(key);
