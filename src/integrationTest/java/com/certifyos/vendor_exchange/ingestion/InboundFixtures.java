@@ -48,6 +48,17 @@ public final class InboundFixtures {
             Collections collections,
             String tenant,
             InboundFileState state) {
+        ExportBatch batch = deliveredBatch(transactions, batches, collections, tenant);
+        InboundFile entry = entryIn(state, tenant, batch.id());
+        collections
+                .batches()
+                .updateOne(Filters.eq("_id", batch.id()), Updates.push("inboundFiles", entry.toDocument()));
+        return new Seeded(batch, entry);
+    }
+
+    /** Inserts a batch and walks it to {@code DELIVERED}, with no inbound entry yet. */
+    public static ExportBatch deliveredBatch(
+            Transactions transactions, ExportBatchRepository batches, Collections collections, String tenant) {
         ExportBatch egressed = EgressFixtures.batchIn(
                 transactions,
                 batches,
@@ -66,12 +77,7 @@ public final class InboundFixtures {
                     null);
             return null;
         });
-        ExportBatch batch = batches.find(egressed.id()).orElseThrow();
-        InboundFile entry = entryIn(state, tenant, batch.id());
-        collections
-                .batches()
-                .updateOne(Filters.eq("_id", batch.id()), Updates.push("inboundFiles", entry.toDocument()));
-        return new Seeded(batch, entry);
+        return batches.find(egressed.id()).orElseThrow();
     }
 
     /** The entry for {@code exportBatchId} in {@code state}, as the earlier states would have left it. */
