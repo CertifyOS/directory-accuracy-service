@@ -11,9 +11,15 @@ import com.certifyos.vendor_exchange.export.api.Items;
 import com.certifyos.vendor_exchange.export.batch.BatchOperations;
 import com.certifyos.vendor_exchange.http.Problem;
 import com.certifyos.vendor_exchange.http.ProblemException;
+import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.BulkDecisionBody;
+import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.BulkDecisionView;
+import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.DecisionBody;
+import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.DecisionResultView;
 import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.FieldView;
 import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.PractitionerFieldsView;
 import com.certifyos.vendor_exchange.ingestion.api.ReviewViews.SummaryView;
+import com.certifyos.vendor_exchange.ingestion.review.ReviewService;
+import com.certifyos.vendor_exchange.ingestion.review.ReviewService.DecisionRequest;
 import com.certifyos.vendor_exchange.ingestion.staging.CandorRecsMapping;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationRepository;
@@ -21,11 +27,13 @@ import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationReposi
 import com.certifyos.vendor_exchange.ingestion.staging.ReviewStatus;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.EnumSet;
@@ -39,8 +47,9 @@ import org.eclipse.microprofile.openapi.annotations.security.SecurityRequirement
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 /**
- * The reviewer's reads of the vendor's field recommendations: the keyset list, one document with
- * its trail, the counts for the filter chips, and one practitioner's documents by id or NPI. The
+ * The reviewer's reads of the vendor's field recommendations (the keyset list, one document with
+ * its trail, the counts for the filter chips, one practitioner's documents by id or NPI) and the
+ * decisions on them, one or many (design step 6). The
  * tenant is the one the {@code tenant-id} header named and the caller holds a role in, never a
  * query parameter; another tenant's document reads as not found. A field recommendation id holds
  * {@code |}, so the client URL-encodes it as one path segment.
@@ -52,7 +61,8 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @SecurityRequirement(name = "platform-token")
 @APIResponse(
         responseCode = "400",
-        description = "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN)",
+        description = "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN, VERSION_REQUIRED, "
+                + "COMMENT_REQUIRED)",
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 @APIResponse(responseCode = "401", description = "No or invalid platform token")
 @APIResponse(
@@ -64,6 +74,11 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
         responseCode = "404",
         description = "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND, PRACTITIONER_NOT_FOUND, "
                 + "BATCH_NOT_FOUND)",
+        content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
+@APIResponse(
+        responseCode = "409",
+        description = "The document's state does not allow the decision or its version moved (DECISION_CONFLICT); "
+                + "the detail is JSON of id, reviewStatus, version and lastDecisionBy",
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 @APIResponse(
         responseCode = "503",
@@ -88,18 +103,21 @@ public class VendorReviewResource {
     private final AuditRepository audit;
     private final BatchOperations batchOperations;
     private final VendorExchangeConfig config;
+    private final ReviewService reviews;
 
     public VendorReviewResource(
             UserContext ctx,
             FieldRecommendationRepository recommendations,
             AuditRepository audit,
             BatchOperations batchOperations,
-            VendorExchangeConfig config) {
+            VendorExchangeConfig config,
+            ReviewService reviews) {
         this.ctx = ctx;
         this.recommendations = recommendations;
         this.audit = audit;
         this.batchOperations = batchOperations;
         this.config = config;
+        this.reviews = reviews;
     }
 
     /**
@@ -255,6 +273,67 @@ public class VendorReviewResource {
                     + "exportBatchId, the batch of the NPI's newest staged document.")
     public PractitionerFieldsView npi(@PathParam("npi") String npi, @QueryParam("exportBatchId") String exportBatchId) {
         return grouped(recommendations.forNpi(ctx.tenantId(), npi, blankToNull(exportBatchId), VIEW_LIMIT));
+    }
+
+    /**
+     * Decides one field recommendation.
+     *
+     * @param id the field recommendation id, URL-encoded
+     * @param body the action, the comment and the version read
+     * @return the document after the decision
+     */
+    @POST
+    @Path("/fields/{id}/decision")
+    @RequiresPermission(Permission.REVIEW_DECIDE)
+    @Operation(
+            summary = "Approve, reject or skip a field recommendation",
+            description = "action is APPROVE, REJECT or SKIP; comment is required on REJECT; version is the one the "
+                    + "reviewer read. APPROVE and REJECT go from PENDING or SKIPPED, SKIP from PENDING; APPROVED and "
+                    + "REJECTED are final. One guarded update with its audit event; a state that does not allow the "
+                    + "action, a stale version or a lost race answers 409 with the current state and who decided "
+                    + "last.")
+    public FieldView decide(@PathParam("id") String id, DecisionBody body) {
+        DecisionRequest request = body == null
+                ? new DecisionRequest(id, null, null, null)
+                : new DecisionRequest(id, ReviewService.actionOf(body.action()), body.comment(), body.version());
+        return FieldView.of(reviews.decide(ctx.tenantId(), request, ctx.email()));
+    }
+
+    /**
+     * Decides many field recommendations, each on its own.
+     *
+     * @param body up to {@code reviewPageLimitMax} decisions
+     * @return 207 with one result per decision, in request order
+     */
+    @POST
+    @Path("/decisions")
+    @RequiresPermission(Permission.REVIEW_DECIDE)
+    @Operation(
+            summary = "Decide many field recommendations",
+            description = "Up to the configured maximum (200) decisions, each under the single decision's rule and "
+                    + "answered on its own: status 200 with the document, 409 with the current document, 400 or 404 "
+                    + "with the code. More than the maximum, or none, is 400 before anything is written.")
+    @APIResponse(
+            responseCode = "207",
+            description = "Per-item results",
+            content = @Content(schema = @Schema(implementation = BulkDecisionView.class)))
+    public Response decideAll(BulkDecisionBody body) {
+        List<DecisionRequest> requests = body == null || body.decisions() == null
+                ? List.of()
+                : body.decisions().stream()
+                        .map(item -> item == null
+                                ? null
+                                : new DecisionRequest(
+                                        item.id(),
+                                        ReviewService.actionOf(item.action()),
+                                        item.comment(),
+                                        item.version()))
+                        .toList();
+        List<DecisionResultView> results = reviews.decideAll(ctx.tenantId(), requests, ctx.email()).stream()
+                .map(result -> new DecisionResultView(
+                        result.id(), result.status(), result.code(), FieldView.of(result.document())))
+                .toList();
+        return Response.status(207).entity(new BulkDecisionView(results)).build();
     }
 
     private static PractitionerFieldsView grouped(List<FieldRecommendation> docs) {

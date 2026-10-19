@@ -402,6 +402,118 @@ class VendorReviewResourceIT {
                 .body("code", Matchers.equalTo("INVALID_REQUEST"));
     }
 
+    @Test
+    void decisionIs200WithDocument() {
+        String batch = batch(9);
+        FieldRecommendation doc = stage(doc(batch, "cert-d1", "1000000901", "loc-1", "phone", STAGED));
+
+        member().body("{\"action\":\"APPROVE\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", doc.id())
+                .then()
+                .statusCode(200)
+                .body("id", Matchers.equalTo(doc.id()))
+                .body("reviewStatus", Matchers.equalTo("APPROVED"))
+                .body("version", Matchers.equalTo(2))
+                .body("reviewHistory[0].action", Matchers.equalTo("APPROVE"))
+                .body("reviewHistory[0].by", Matchers.equalTo(REVIEWER));
+        member().body("{\"action\":\"APPROVE\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", doc.id())
+                .then()
+                .statusCode(409)
+                .contentType(Problem.MEDIA_TYPE)
+                .body("code", Matchers.equalTo("DECISION_CONFLICT"))
+                .body("detail", Matchers.containsString("\"reviewStatus\":\"APPROVED\""))
+                .body("detail", Matchers.containsString("\"lastDecisionBy\":\"" + REVIEWER + "\""));
+        member().get(BASE + "/fields/{id}/events", doc.id())
+                .then()
+                .statusCode(200)
+                .body("items.type", Matchers.contains("FIELD_APPROVED"))
+                .body("items[0].actor", Matchers.equalTo(REVIEWER));
+
+        FieldRecommendation other = stage(doc(batch, "cert-d2", "1000000902", "loc-2", "phone", STAGED));
+        member().body("{\"action\":\"REJECT\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", other.id())
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("COMMENT_REQUIRED"));
+        member().body("{\"action\":\"APPROVE\"}")
+                .post(BASE + "/fields/{id}/decision", other.id())
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("VERSION_REQUIRED"));
+        member().body("{\"action\":\"ROLLBACK\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", other.id())
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("INVALID_REQUEST"));
+        member().body("{\"action\":\"MAYBE\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", other.id())
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("INVALID_REQUEST"));
+        member().post(BASE + "/fields/{id}/decision", other.id())
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("INVALID_REQUEST"));
+        member().body("{\"action\":\"APPROVE\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", "org-review|candor|nope|cert-x|-|phone")
+                .then()
+                .statusCode(404)
+                .body("code", Matchers.equalTo("FIELD_NOT_FOUND"));
+    }
+
+    @Test
+    void bulkIs207() {
+        String batch = batch(10);
+        FieldRecommendation approve = stage(doc(batch, "cert-u1", "1000001001", "loc-1", "phone", STAGED));
+        FieldRecommendation reject = stage(doc(batch, "cert-u2", "1000001002", "loc-2", "phone", STAGED));
+        String missing = Ids.fieldRecommendationId(TENANT, "candor", batch, "cert-u9", null, "phone");
+
+        member().body("{\"decisions\":["
+                        + "{\"id\":\"" + approve.id() + "\",\"action\":\"APPROVE\",\"version\":1},"
+                        + "{\"id\":\"" + reject.id()
+                        + "\",\"action\":\"REJECT\",\"comment\":\"still old\",\"version\":1},"
+                        + "{\"id\":\"" + missing + "\",\"action\":\"APPROVE\",\"version\":1},"
+                        + "{\"id\":\"" + approve.id() + "\",\"action\":\"SKIP\",\"version\":1},"
+                        + "{\"id\":\"" + reject.id() + "\",\"action\":\"NOPE\",\"version\":2}]}")
+                .post(BASE + "/decisions")
+                .then()
+                .statusCode(207)
+                .body("results.id", Matchers.contains(approve.id(), reject.id(), missing, approve.id(), reject.id()))
+                .body("results.status", Matchers.contains(200, 200, 404, 409, 400))
+                .body("results[0].code", Matchers.nullValue())
+                .body("results[0].document.reviewStatus", Matchers.equalTo("APPROVED"))
+                .body("results[1].document.reviewStatus", Matchers.equalTo("REJECTED"))
+                .body("results[2].code", Matchers.equalTo("FIELD_NOT_FOUND"))
+                .body("results[2].document", Matchers.nullValue())
+                .body("results[3].code", Matchers.equalTo("DECISION_CONFLICT"))
+                .body("results[3].document.version", Matchers.equalTo(2))
+                .body("results[4].code", Matchers.equalTo("INVALID_REQUEST"));
+
+        StringBuilder tooMany = new StringBuilder("{\"decisions\":[");
+        for (int index = 0; index < 201; index++) {
+            tooMany.append(index == 0 ? "" : ",")
+                    .append("{\"id\":\"")
+                    .append(approve.id())
+                    .append("\",\"action\":\"SKIP\",\"version\":2}");
+        }
+        member().body(tooMany.append("]}").toString())
+                .post(BASE + "/decisions")
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("INVALID_REQUEST"));
+        member().body("{\"decisions\":[]}")
+                .post(BASE + "/decisions")
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("INVALID_REQUEST"));
+        member().get(BASE + "/fields/{id}", approve.id())
+                .then()
+                .statusCode(200)
+                .body("reviewStatus", Matchers.equalTo("APPROVED"))
+                .body("version", Matchers.equalTo(2));
+    }
+
     // helpers
 
     static String batch(int seq) {

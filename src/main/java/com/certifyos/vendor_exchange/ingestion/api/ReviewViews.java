@@ -121,4 +121,44 @@ public final class ReviewViews {
             fields = fields == null ? List.of() : List.copyOf(fields);
         }
     }
+
+    /**
+     * {@code decision} body.
+     *
+     * @param action {@code APPROVE}, {@code REJECT} or {@code SKIP}
+     * @param comment the reviewer's reason, required on {@code REJECT}
+     * @param version the {@code version} the reviewer read
+     */
+    public record DecisionBody(String action, String comment, Long version) {}
+
+    /**
+     * One item of a bulk decision.
+     *
+     * @param id the field recommendation
+     * @param action {@code APPROVE}, {@code REJECT} or {@code SKIP}
+     * @param comment the reviewer's reason, required on {@code REJECT}
+     * @param version the {@code version} the reviewer read
+     */
+    public record DecisionItem(String id, String action, String comment, Long version) {}
+
+    /** {@code decisions} body. */
+    public record BulkDecisionBody(List<DecisionItem> decisions) {}
+
+    /**
+     * One item's outcome.
+     *
+     * @param id the field recommendation
+     * @param status 200, 400, 404 or 409, as the single decision endpoint would answer
+     * @param code the problem code when not 200
+     * @param document the current document on 200 and 409, else null
+     */
+    public record DecisionResultView(String id, int status, String code, FieldView document) {}
+
+    /** {@code decisions} answer, one result per item in request order. */
+    public record BulkDecisionView(List<DecisionResultView> results) {
+
+        public BulkDecisionView {
+            results = results == null ? List.of() : List.copyOf(results);
+        }
+    }
 }
