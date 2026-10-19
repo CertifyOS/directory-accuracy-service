@@ -18,6 +18,7 @@ import com.mongodb.client.model.WriteModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -143,6 +144,28 @@ public class FieldRecommendationRepository {
     }
 
     /**
+     * Where existing documents came from, for staging to tell its own earlier writes from another
+     * upload's. Reads {@code _id} and {@code sourceFile} only, at most {@code ids.size()} documents.
+     *
+     * @param tenantId the tenant
+     * @param ids recommendation ids
+     * @return id to source file, for the ids that exist
+     */
+    public Map<String, FieldRecommendation.SourceFile> sourceFilesOf(String tenantId, Collection<String> ids) {
+        Map<String, FieldRecommendation.SourceFile> sources = new HashMap<>();
+        if (!ids.isEmpty()) {
+            recommendations()
+                    .find(Filters.and(Filters.in("_id", ids), Filters.eq("tenantId", tenantId)))
+                    .projection(Projections.include("sourceFile"))
+                    .limit(ids.size())
+                    .forEach(doc -> Documents.nested(doc, "sourceFile")
+                            .ifPresent(source -> sources.put(
+                                    doc.getString("_id"), FieldRecommendation.SourceFile.fromDocument(source))));
+        }
+        return sources;
+    }
+
+    /**
      * A page of the review list, newest staged first, by keyset on {@code (stagedAt, _id)}. A document
      * decided between two pages leaves the list without moving any other row across the cursor.
      *
@@ -238,7 +261,7 @@ public class FieldRecommendationRepository {
      *
      * @param tenantId the tenant
      * @param certifyPractitionerId the practitioner
-     * @param exportBatchId the batch, or null for the practitioner's latest batch (batch ids sort by period)
+     * @param exportBatchId the batch, or null for the practitioner's latest (its newest staged document's)
      * @param limit the most documents to return
      * @return the documents by id, empty when the practitioner has none
      */
@@ -252,7 +275,7 @@ public class FieldRecommendationRepository {
      *
      * @param tenantId the tenant
      * @param npi the NPI
-     * @param exportBatchId the batch, or null for the NPI's latest batch (batch ids sort by period)
+     * @param exportBatchId the batch, or null for the NPI's latest (its newest staged document's batch)
      * @param limit the most documents to return
      * @return the documents by id, empty when the NPI has none
      */
@@ -268,7 +291,7 @@ public class FieldRecommendationRepository {
         if (batch == null) {
             Document latest = recommendations()
                     .find(owner)
-                    .sort(Sorts.descending("exportBatchId"))
+                    .sort(Sorts.descending("stagedAt", "_id"))
                     .projection(Projections.include("exportBatchId"))
                     .limit(1)
                     .first();

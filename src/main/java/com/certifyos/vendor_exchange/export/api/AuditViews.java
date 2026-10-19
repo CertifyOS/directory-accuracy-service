@@ -4,7 +4,11 @@ import com.certifyos.vendor_exchange.audit.AuditEvent;
 import java.time.Instant;
 import java.util.Map;
 
-/** The audit envelope as the API shows it: the stored document, {@code jobId} included (it links to the JobRunr entry). */
+/**
+ * The audit envelope as the API shows it: the stored document, {@code jobId} included (it links to the
+ * JobRunr entry), and the ingestion ids a file or field event carries ({@code uploadId},
+ * {@code fieldRecommendationId}, {@code certifyPractitionerId}, {@code releaseId}), null on export events.
+ */
 public final class AuditViews {
 
     private AuditViews() {}
@@ -19,6 +23,10 @@ public final class AuditViews {
             Integer attempt,
             String actor,
             String jobId,
+            String uploadId,
+            String fieldRecommendationId,
+            String certifyPractitionerId,
+            String releaseId,
             Instant occurredAt,
             Map<String, Object> detail) {
 
@@ -33,6 +41,10 @@ public final class AuditViews {
                     event.attempt(),
                     event.actor(),
                     event.jobId(),
+                    event.uploadId(),
+                    event.fieldRecommendationId(),
+                    event.certifyPractitionerId(),
+                    event.releaseId(),
                     event.occurredAt(),
                     event.detail());
         }

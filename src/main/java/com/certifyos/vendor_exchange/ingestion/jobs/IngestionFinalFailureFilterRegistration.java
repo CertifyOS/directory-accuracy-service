@@ -10,10 +10,12 @@ import java.util.List;
 import org.jobrunr.server.BackgroundJobServer;
 
 /**
- * Registers {@link IngestionFinalFailureFilter} on the worker's job server, beside the export lane's
- * filter: {@code BackgroundJobServer.setJobFilters} appends (plan P6, checked with {@code javap} at
- * Gate 0), so a second observer adds the ingestion filter without touching the export lane's. Same
- * priority as the export registration, so both run before {@code JobRunrStarter} starts the server.
+ * Registers {@link IngestionFinalFailureFilter} on the worker's JobRunr server, as the export lane's
+ * {@code BatchFinalFailureFilterRegistration} registers its own: quarkus-jobrunr (open source) does
+ * not register CDI job filters, and {@code setJobFilters} appends (plan P6, checked with {@code
+ * javap} at Gate 0), so the filter joins JobRunr's retry filter and the export lane's. The priority
+ * runs this observer before {@code JobRunrStarter} starts the server on the same {@code StartupEvent},
+ * so no job can fail before the filter exists. The api role has no server; nothing is registered.
  */
 @ApplicationScoped
 public class IngestionFinalFailureFilterRegistration {

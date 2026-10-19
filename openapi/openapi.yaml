@@ -23,6 +23,20 @@ components:
           type: string
         jobId:
           type: string
+    BulkDecisionBody:
+      type: object
+      properties:
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/DecisionItem"
+    BulkDecisionView:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/DecisionResultView"
     BulkReleaseAccepted:
       type: object
       properties:
@@ -73,6 +87,40 @@ components:
           type: string
         lte:
           type: string
+    DecisionBody:
+      type: object
+      properties:
+        action:
+          type: string
+        comment:
+          type: string
+        version:
+          type: integer
+          format: int64
+    DecisionItem:
+      type: object
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+        comment:
+          type: string
+        version:
+          type: integer
+          format: int64
+    DecisionResultView:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: integer
+          format: int32
+        code:
+          type: string
+        document:
+          $ref: "#/components/schemas/FieldView"
     DisableRequest:
       type: object
       properties:
@@ -90,11 +138,109 @@ components:
           type: string
         catchUp:
           type: boolean
+    FieldView:
+      type: object
+      properties:
+        id:
+          type: string
+        tenantId:
+          type: string
+        sourceType:
+          type: string
+        source:
+          type: string
+        exportBatchId:
+          type: string
+        practitioner:
+          $ref: "#/components/schemas/Practitioner"
+        location:
+          $ref: "#/components/schemas/Location"
+        field:
+          type: string
+        sentValue:
+          type: string
+        vendorValue:
+          type: string
+        vendorStatus:
+          type: string
+        vendorReason:
+          type: array
+          items:
+            type: string
+        vendorConfidence:
+          type: string
+        vendorEvidence:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+        reviewStatus:
+          type: string
+        reviewHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryEntry"
+        version:
+          type: integer
+          format: int64
+        goldenRecordUpdate:
+          $ref: "#/components/schemas/GoldenRecordUpdate"
+        sourceFile:
+          $ref: "#/components/schemas/SourceFile"
+        stagedAt:
+          $ref: "#/components/schemas/Instant"
+        updatedAt:
+          $ref: "#/components/schemas/Instant"
+    GoldenRecordUpdate:
+      type: object
+      properties:
+        releaseId:
+          type: string
+        requestedBy:
+          type: string
+        requestedAt:
+          $ref: "#/components/schemas/Instant"
+        writePath:
+          type: string
+        resource:
+          type: string
+        crosswalkId:
+          type: string
+        sliceId:
+          type: string
+        writtenAt:
+          $ref: "#/components/schemas/Instant"
+        deadlineJobId:
+          type: string
+        outcome:
+          type: string
+        winningSource:
+          type: string
+        releasedAt:
+          $ref: "#/components/schemas/Instant"
+        error:
+          type: string
+    HistoryEntry:
+      type: object
+      properties:
+        action:
+          type: string
+        by:
+          type: string
+        at:
+          $ref: "#/components/schemas/Instant"
+        comment:
+          type: string
     Instant:
       type: string
       format: date-time
       examples:
       - 2022-03-10T16:15:50Z
+    Location:
+      type: object
+      properties:
+        certifyLocationId:
+          type: string
     Message:
       type: object
       properties:
@@ -108,6 +254,13 @@ components:
           type: object
           additionalProperties:
             type: string
+    Practitioner:
+      type: object
+      properties:
+        certifyPractitionerId:
+          type: string
+        npi:
+          type: string
     PreviewRequest:
       type: object
       properties:
@@ -251,6 +404,16 @@ components:
           type: string
         code:
           type: string
+    SourceFile:
+      type: object
+      properties:
+        uploadId:
+          type: string
+        sheet:
+          type: string
+        row:
+          type: integer
+          format: int32
     SupersedeResponse:
       type: object
       properties:
@@ -311,6 +474,42 @@ paths:
         "401":
           description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
             \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "400":
+          description: Bad Request
+  /internal/vendor-ingestion/completions:
+    post:
+      summary: Receive a file-ingestion completion event
+      description: "Pub/Sub push endpoint for file-ingestion's completion events on\
+        \ this consumer's topic. Requires the subscription's OIDC identity token;\
+        \ reads the base64 event body, finds the inbound file by externalRef and records\
+        \ the parse outcome. Answers 204 to acknowledge every outcome, including an\
+        \ event it cannot read or match, and 503 while the ingestion request for the\
+        \ file is not committed yet, so the event is delivered again."
+      tags:
+      - internal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PubSubPushMessage"
+        required: true
+      responses:
+        "204":
+          description: Acknowledged
+        "401":
+          description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
+            \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The inbound file's ingestion request is not committed yet;
+            redeliver (ARCHIVING_NOT_COMMITTED)
           content:
             application/problem+json:
               schema:
@@ -1441,6 +1640,368 @@ paths:
                 $ref: "#/components/schemas/Problem"
       security:
       - platform-token: []
+  /v1/vendor-review/decisions:
+    post:
+      summary: Decide many field recommendations
+      description: "Up to the configured maximum (200) decisions, each under the single\
+        \ decision's rule and answered on its own: status 200 with the document, 409\
+        \ with the current document, 400 or 404 with the code. More than the maximum,\
+        \ or none, is 400 before anything is written."
+      tags:
+      - vendor-review
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkDecisionBody"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "207":
+          description: Per-item results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkDecisionView"
+      security:
+      - platform-token: []
+  /v1/vendor-review/fields:
+    get:
+      summary: List field recommendations
+      description: "One page of the tenant's field recommendations, newest staged\
+        \ first, filtered by field, review status (repeatable, default PENDING), NPI\
+        \ and export batch. Pages by keyset: pass the previous page's next as after;\
+        \ a row decided between two pages never shifts another across the cursor.\
+        \ limit is 10 to the configured maximum (200), default 50."
+      tags:
+      - vendor-review
+      parameters:
+      - name: after
+        in: query
+        schema:
+          type: string
+      - name: exportBatchId
+        in: query
+        schema:
+          type: string
+      - name: field
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          format: int32
+      - name: npi
+        in: query
+        schema:
+          type: string
+      - name: reviewStatus
+        in: query
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/fields/summary:
+    get:
+      summary: Count field recommendations by field and status
+      description: "Counts per field and review status for the filter chips. With\
+        \ exportBatchId the answer also carries the batch's state, so a SUPERSEDED\
+        \ cycle shows on the review screen."
+      tags:
+      - vendor-review
+      parameters:
+      - name: exportBatchId
+        in: query
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/fields/{id}:
+    get:
+      summary: Read a field recommendation
+      description: "The stored document with the vendor's evidence, the review history\
+        \ and the version a decision must send back."
+      tags:
+      - vendor-review
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/fields/{id}/decision:
+    post:
+      summary: "Approve, reject or skip a field recommendation"
+      description: "action is APPROVE, REJECT or SKIP; comment is required on REJECT;\
+        \ version is the one the reviewer read. APPROVE and REJECT go from PENDING\
+        \ or SKIPPED, SKIP from PENDING; APPROVED and REJECTED are final. One guarded\
+        \ update with its audit event; a state that does not allow the action, a stale\
+        \ version or a lost race answers 409 with the current state and who decided\
+        \ last."
+      tags:
+      - vendor-review
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionBody"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/fields/{id}/events:
+    get:
+      summary: List a field recommendation's audit events
+      description: "The field's decision and release events from vendor_review_events,\
+        \ oldest first. The trail outlives the document: a trail that exists is returned\
+        \ even when the document is gone."
+      tags:
+      - vendor-review
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
   /v1/vendor-review/fields/{id}/release:
     post:
       summary: Release one approved field
@@ -1575,6 +2136,122 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "503":
           description: User or tenant configuration lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/npis/{npi}:
+    get:
+      summary: Read one NPI's field recommendations
+      description: "The practitioner view looked up by NPI, for screens that start\
+        \ from an NPI. Without exportBatchId, the batch of the NPI's newest staged\
+        \ document."
+      tags:
+      - vendor-review
+      parameters:
+      - name: npi
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: exportBatchId
+        in: query
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/practitioners/{certifyPractitionerId}:
+    get:
+      summary: Read one practitioner's field recommendations
+      description: "Every document of one practitioner in one batch, practitioner-level\
+        \ fields first, then by location. Without exportBatchId, the batch of the\
+        \ practitioner's newest staged document."
+      tags:
+      - vendor-review
+      parameters:
+      - name: certifyPractitionerId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: exportBatchId
+        in: query
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, INVALID_REQUEST, FIELD_UNKNOWN,\
+            \ VERSION_REQUIRED, COMMENT_REQUIRED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
+            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "The document's state does not allow the decision or its version\
+            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
+            \ and lastDecisionBy"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
           content:
             application/problem+json:
               schema:

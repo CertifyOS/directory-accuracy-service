@@ -8,6 +8,7 @@ import com.certifyos.vendor_exchange.audit.AuditRepository;
 import com.certifyos.vendor_exchange.clients.ApiLayerTokenService;
 import com.certifyos.vendor_exchange.clients.WireMockUpstreams;
 import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
+import com.certifyos.vendor_exchange.export.jobs.JobIds;
 import com.certifyos.vendor_exchange.ingestion.InboundFixtures;
 import com.certifyos.vendor_exchange.ingestion.InboundFixtures.Seeded;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
@@ -24,6 +25,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import java.util.List;
+import java.util.UUID;
+import org.jobrunr.jobs.states.StateName;
+import org.jobrunr.storage.StorageProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,6 +62,9 @@ class IngestionDeadlineCheckJobIT {
 
     @Inject
     Collections collections;
+
+    @Inject
+    StorageProvider storage;
 
     @InjectMock
     ApiLayerTokenService tokens;
@@ -144,6 +151,30 @@ class IngestionDeadlineCheckJobIT {
                 List.of(AuditEventType.INBOUND_FILE_PARSED),
                 written.stream().map(AuditEvent::type).toList());
         Assertions.assertEquals("DEADLINE", written.get(0).detail().get("completionSource"));
+    }
+
+    @Test
+    void completedAtDeadlineParsesAndEnqueuesStaging() {
+        String tenant = "ingdl-staging";
+        Seeded seeded = seed(tenant, InboundFileState.INGESTION_REQUESTED);
+        stubStatus(
+                tenant,
+                "{\"ingestionId\":\"" + ingestionId(tenant) + "\",\"status\":\"COMPLETED\","
+                        + "\"counts\":{\"populatedRows\":5,\"validRows\":5,\"invalidRows\":0}}");
+
+        run(seeded);
+
+        InboundFile after = entry(seeded);
+        Assertions.assertEquals(InboundFileState.PARSED, after.state());
+        Assertions.assertEquals("COMPLETED", after.parse().status());
+        Assertions.assertEquals("DEADLINE", after.parse().completionSource());
+        Assertions.assertEquals(5L, after.parse().populatedRows());
+        UUID stageJobId = JobIds.of("stage-rows", seeded.entry().uploadId(), 1);
+        org.jobrunr.jobs.Job stage = storage.getJobById(stageJobId);
+        Assertions.assertEquals(StateName.ENQUEUED, stage.getState());
+        Assertions.assertEquals(
+                StageRowsJob.class.getName(), stage.getJobDetails().getClassName());
+        Assertions.assertEquals(stageJobId.toString(), after.jobId(), "the stage job now owns the entry");
     }
 
     @Test
