@@ -45,7 +45,7 @@ class InboundFileStateTest {
                 .filter(InboundFileState::isTerminal)
                 .toList());
 
-        Assertions.assertEquals(EnumSet.of(STAGED, DUPLICATE_LOGGED, INGESTION_FAILED, FAILED), terminal);
+        Assertions.assertEquals(EnumSet.of(STAGED, DUPLICATE_LOGGED, INGESTION_FAILED), terminal);
         Assertions.assertEquals(EnumSet.of(RECEIVED, ARCHIVING, PARSED, STAGING), InboundFileState.reconcilable());
     }
 }

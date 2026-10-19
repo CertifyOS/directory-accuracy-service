@@ -32,7 +32,8 @@ public record ArrivalEvent(
      * Reads the attributes.
      *
      * @param attributes the push message attributes, may be null
-     * @return the event, or empty when the bucket, object or generation is missing or blank
+     * @return the event, or empty when the bucket, object or generation is missing, blank, contains
+     *     {@code |} or whitespace, or (for the generation) is not a positive number
      */
     public static Optional<ArrivalEvent> fromAttributes(Map<String, String> attributes) {
         if (attributes == null) {
@@ -41,7 +42,7 @@ public record ArrivalEvent(
         String bucket = attributes.get("bucketId");
         String object = attributes.get("objectId");
         String generation = attributes.get("objectGeneration");
-        if (isBlank(bucket) || isBlank(object) || isBlank(generation)) {
+        if (!validLeg(bucket) || !validLeg(object) || !validLeg(generation) || !positiveLong(generation)) {
             return Optional.empty();
         }
         return Optional.of(new ArrivalEvent(
@@ -63,8 +64,20 @@ public record ArrivalEvent(
         return Ids.uploadId(bucketId, objectId, objectGeneration);
     }
 
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
+    /** The rules {@link Ids#uploadId} applies to a leg, so {@link #uploadId()} cannot throw for a parsed event. */
+    private static boolean validLeg(String value) {
+        return value != null
+                && !value.isBlank()
+                && value.indexOf('|') < 0
+                && value.codePoints().noneMatch(point -> Character.isWhitespace(point) || Character.isSpaceChar(point));
+    }
+
+    private static boolean positiveLong(String value) {
+        try {
+            return Long.parseLong(value) > 0;
+        } catch (NumberFormatException exception) {
+            return false;
+        }
     }
 
     private static Instant instant(String value) {

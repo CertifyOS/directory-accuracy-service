@@ -10,6 +10,7 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
 import com.certifyos.vendor_exchange.persistence.Collections;
+import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
@@ -123,7 +124,7 @@ public final class InboundFixtures {
                         "gs://vendor-ingestion-archive/"
                                 + InboundNames.archiveObject(tenant, exportBatchId, GENERATION, fileName))
                 .append("archiveBytes", 52_000L)
-                .append("externalRef", exportBatchId + "|" + GENERATION)
+                .append("externalRef", Ids.externalRef(exportBatchId, GENERATION))
                 .append("requestedAt", ARRIVED_AT.plusSeconds(11));
     }
 

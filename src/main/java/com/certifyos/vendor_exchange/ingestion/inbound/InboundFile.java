@@ -157,6 +157,9 @@ public record InboundFile(
     }
 
     public InboundFile {
+        if (dispositions != null && dispositions.containsValue(null)) {
+            throw new IllegalArgumentException("dispositions must not hold a null count: " + uploadId);
+        }
         dispositions = dispositions == null ? Map.of() : Map.copyOf(dispositions);
     }
 
@@ -166,7 +169,7 @@ public record InboundFile(
      * @return the bucket
      */
     public String bucket() {
-        return uploadId.substring(0, uploadId.indexOf(SEPARATOR));
+        return uploadId.substring(0, firstSeparator());
     }
 
     /**
@@ -175,7 +178,15 @@ public record InboundFile(
      * @return the object name
      */
     public String objectName() {
-        return uploadId.substring(uploadId.indexOf(SEPARATOR) + 1, uploadId.lastIndexOf(SEPARATOR));
+        return uploadId.substring(firstSeparator() + 1, uploadId.lastIndexOf(SEPARATOR));
+    }
+
+    private int firstSeparator() {
+        int first = uploadId == null ? -1 : uploadId.indexOf(SEPARATOR);
+        if (first < 1 || first == uploadId.lastIndexOf(SEPARATOR)) {
+            throw new IllegalStateException("uploadId needs three '|' separated legs: " + uploadId);
+        }
+        return first;
     }
 
     /**
@@ -272,14 +283,13 @@ public record InboundFile(
      * @return the entry; a document written before {@code attempt} existed reads as 0
      */
     public static InboundFile fromDocument(Document doc) {
-        String stateName = doc.getString("state");
         Integer storedAttempt = Documents.intValue(doc, "attempt");
         return new InboundFile(
                 doc.getString("uploadId"),
                 doc.getString("generation"),
                 doc.getString("vendorBatchId"),
                 doc.getString("fileDate"),
-                stateName == null ? null : InboundFileState.valueOf(stateName),
+                stateOf(doc),
                 storedAttempt == null ? 0 : storedAttempt,
                 doc.getString("jobId"),
                 doc.getString("archivePath"),
@@ -302,6 +312,19 @@ public record InboundFile(
                 Documents.instant(doc, "parsedAt"),
                 Documents.instant(doc, "stagedAt"),
                 Documents.instant(doc, "updatedAt"));
+    }
+
+    private static InboundFileState stateOf(Document doc) {
+        String stateName = doc.getString("state");
+        if (stateName == null) {
+            return null;
+        }
+        try {
+            return InboundFileState.valueOf(stateName);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalStateException(
+                    "unknown inbound file state '" + stateName + "' on " + doc.getString("uploadId"), exception);
+        }
     }
 
     private static Map<String, Long> dispositionsOf(Document doc) {

@@ -50,6 +50,25 @@ class ArrivalEventTest {
     }
 
     @Test
+    void unreadableIdentityIsEmpty() {
+        for (String[] bad : new String[][] {
+            {"objectId", "to/org xyz/file.csv"},
+            {"objectId", "to/org|xyz/file.csv"},
+            {"objectId", "to/org\txyz/file.csv"},
+            {"bucketId", "vendor sftp"},
+            {"bucketId", "vendor|sftp"},
+            {"objectGeneration", "abc"},
+            {"objectGeneration", "0"},
+            {"objectGeneration", "-5"},
+            {"objectGeneration", "12 3"}
+        }) {
+            Map<String, String> attributes = attributes();
+            attributes.put(bad[0], bad[1]);
+            Assertions.assertTrue(ArrivalEvent.fromAttributes(attributes).isEmpty(), bad[0] + "=" + bad[1]);
+        }
+    }
+
+    @Test
     void optionalAttributesMayBeAbsentOrUnparseable() {
         Map<String, String> attributes = attributes();
         attributes.remove("overwroteGeneration");

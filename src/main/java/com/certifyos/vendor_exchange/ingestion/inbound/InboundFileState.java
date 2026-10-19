@@ -53,9 +53,9 @@ public enum InboundFileState {
         };
     }
 
-    /** Whether no job will run for an entry in this state until an operator acts. */
+    /** Whether the entry can never move again. {@code FAILED} is not terminal: an operator retry leaves it. */
     public boolean isTerminal() {
-        return this == STAGED || this == DUPLICATE_LOGGED || this == INGESTION_FAILED || this == FAILED;
+        return this == STAGED || this == DUPLICATE_LOGGED || this == INGESTION_FAILED;
     }
 
     /** The states the reconciler watches: an entry sitting here without progress is stuck. */

@@ -14,7 +14,9 @@ import java.util.regex.Pattern;
  * {@code to/<tenant>/<tenant>_<exportBatchRef>_<vendorBatchId>_<yyyyMMdd>.csv}, and the service
  * archives it as {@code <tenantId>/<exportBatchId>/<generation>/<fileName>}. Tenant ids and export
  * batch ids never contain an underscore, so those legs split exactly; the vendor batch id is
- * whatever lies between the batch ref and the date.
+ * whatever lies between the batch ref and the date. A ref containing an underscore is refused, and
+ * every leg is limited to letters, digits, {@code .} and {@code -} (the vendor id also allows
+ * {@code _}), with {@code .} and {@code ..} refused.
  */
 public final class InboundNames {
 
@@ -24,8 +26,8 @@ public final class InboundNames {
     public static final String TENANT_MISMATCH = "TENANT_MISMATCH";
     public static final String BATCH_NOT_DELIVERED = "BATCH_NOT_DELIVERED";
 
-    private static final Pattern NAME =
-            Pattern.compile("^to/([^/_]+)/([^/_]+)_([^/_]+)_([^/]+)_(\\d{8})\\.csv$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAME = Pattern.compile(
+            "^to/([A-Za-z0-9.-]+)/([A-Za-z0-9.-]+)_([A-Za-z0-9.-]+)_([A-Za-z0-9._-]+)_(\\d{8})\\.(?i:csv)$");
     private static final DateTimeFormatter DAY =
             DateTimeFormatter.ofPattern("uuuuMMdd", Locale.ROOT).withResolverStyle(ResolverStyle.STRICT);
 
@@ -63,6 +65,11 @@ public final class InboundNames {
         if (!matcher.matches() || !validDate(matcher.group(5))) {
             return Optional.empty();
         }
+        for (int group = 1; group <= 4; group++) {
+            if (isDots(matcher.group(group))) {
+                return Optional.empty();
+            }
+        }
         return Optional.of(new Parsed(
                 matcher.group(1),
                 matcher.group(2),
@@ -82,7 +89,21 @@ public final class InboundNames {
      * @return {@code <tenantId>/<exportBatchId>/<generation>/<fileName>}
      */
     public static String archiveObject(String tenantId, String exportBatchId, String generation, String fileName) {
+        requireSegment("tenantId", tenantId);
+        requireSegment("exportBatchId", exportBatchId);
+        requireSegment("generation", generation);
+        requireSegment("fileName", fileName);
         return tenantId + "/" + exportBatchId + "/" + generation + "/" + fileName;
+    }
+
+    private static void requireSegment(String name, String value) {
+        if (value == null || value.isBlank() || value.indexOf('/') >= 0 || isDots(value)) {
+            throw new IllegalArgumentException(name + " is not a safe path segment: " + value);
+        }
+    }
+
+    private static boolean isDots(String value) {
+        return ".".equals(value) || "..".equals(value);
     }
 
     private static boolean validDate(String digits) {
