@@ -41,6 +41,8 @@ google-cloud-storage = { module = "com.google.cloud:google-cloud-storage", versi
 google-cloud-pubsub = { module = "com.google.cloud:google-cloud-pubsub", version.ref = "google-cloud-pubsub" }
 google-auth-oauth2-http = { module = "com.google.auth:google-auth-library-oauth2-http", version.ref = "google-auth" }
 java-uuid-generator = { module = "com.fasterxml.uuid:java-uuid-generator", version.ref = "java-uuid-generator" }
+# No version: the enforced Quarkus BOM pins commons-codec (1.21.0 on Quarkus 3.33.3) and would override one here.
+commons-codec = { module = "commons-codec:commons-codec" }
 
 quarkus-jacoco = { module = "io.quarkus:quarkus-jacoco" }
 quarkus-junit = { module = "io.quarkus:quarkus-junit" }
