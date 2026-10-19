@@ -32,8 +32,9 @@ public record ArrivalEvent(
      * Reads the attributes.
      *
      * @param attributes the push message attributes, may be null
-     * @return the event, or empty when the bucket, object or generation is missing, blank, contains
-     *     {@code |} or whitespace, or (for the generation) is not a positive number
+     * @return the event, or empty when the bucket, object or generation is missing or blank, the
+     *     bucket or generation contains {@code |} or whitespace, or the generation is not a positive
+     *     number; an object name may contain both, since {@link Ids#uploadId} escapes it
      */
     public static Optional<ArrivalEvent> fromAttributes(Map<String, String> attributes) {
         if (attributes == null) {
@@ -42,7 +43,11 @@ public record ArrivalEvent(
         String bucket = attributes.get("bucketId");
         String object = attributes.get("objectId");
         String generation = attributes.get("objectGeneration");
-        if (!validLeg(bucket) || !validLeg(object) || !validLeg(generation) || !positiveLong(generation)) {
+        if (!validLeg(bucket)
+                || object == null
+                || object.isBlank()
+                || !validLeg(generation)
+                || !positiveLong(generation)) {
             return Optional.empty();
         }
         return Optional.of(new ArrivalEvent(
@@ -64,7 +69,10 @@ public record ArrivalEvent(
         return Ids.uploadId(bucketId, objectId, objectGeneration);
     }
 
-    /** The rules {@link Ids#uploadId} applies to a leg, so {@link #uploadId()} cannot throw for a parsed event. */
+    /**
+     * The rules {@link Ids#uploadId} applies to the bucket and generation legs, so {@link #uploadId()}
+     * cannot throw for a parsed event.
+     */
     private static boolean validLeg(String value) {
         return value != null
                 && !value.isBlank()

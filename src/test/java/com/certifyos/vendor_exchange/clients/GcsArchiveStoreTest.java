@@ -45,7 +45,7 @@ class GcsArchiveStoreTest {
     }
 
     @Test
-    void successReturnsTheArchivePathAndSendsBothPreconditions() {
+    void successReturnsTheArchivePathAndSendsOnlyTheTargetPrecondition() {
         CopyWriter writer = Mockito.mock(CopyWriter.class);
         Blob copied = blobOfSize(4096L);
         Mockito.when(writer.getResult()).thenReturn(copied);
@@ -60,8 +60,9 @@ class GcsArchiveStoreTest {
         Mockito.verify(storage).copy(sent.capture());
         Assertions.assertEquals(SOURCE, sent.getValue().getSource());
         Assertions.assertEquals(
-                List.of(Storage.BlobSourceOption.generationMatch()),
-                sent.getValue().getSourceOptions());
+                List.of(),
+                sent.getValue().getSourceOptions(),
+                "the pinned generation is the guard; a live-generation check would refuse an overwritten source");
         Assertions.assertEquals(TARGET, sent.getValue().getTarget().getBlobId());
         Assertions.assertEquals(
                 List.of(Storage.BlobTargetOption.doesNotExist()),
