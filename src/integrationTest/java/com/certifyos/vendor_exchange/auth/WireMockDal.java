@@ -44,6 +44,11 @@ public class WireMockDal implements QuarkusTestResourceLifecycleManager {
         client().register(mapping);
     }
 
+    /** Clears the request journal, so a test's counts do not include earlier tests' calls. */
+    public static void resetRequests() {
+        client().resetRequests();
+    }
+
     /** Asserts how often a request matched. */
     public static void verify(int count, RequestPatternBuilder pattern) {
         client().verifyThat(count, pattern);

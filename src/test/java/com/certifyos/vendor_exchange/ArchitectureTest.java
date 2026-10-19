@@ -35,7 +35,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
         importOptions = {ImportOption.DoNotIncludeTests.class, ImportOption.DoNotIncludeJars.class})
 class ArchitectureTest {
 
-    /** Shared code never imports feature code: the foundations know nothing about the export lane. */
+    /** Shared code never imports feature code: the foundations know nothing about either lane. */
     @ArchTest
     static final ArchRule sharedPackagesDoNotDependOnFeatures = ArchRuleDefinition.noClasses()
             .that()
@@ -49,7 +49,17 @@ class ArchitectureTest {
                     "..vendor_exchange.metrics..")
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("..vendor_exchange.export..")
+            .resideInAnyPackage("..vendor_exchange.export..", "..vendor_exchange.ingestion..")
+            .allowEmptyShould(true);
+
+    /** The export lane is phase 1 and stands alone: it never reaches into the ingestion lane. */
+    @ArchTest
+    static final ArchRule exportDoesNotDependOnIngestion = ArchRuleDefinition.noClasses()
+            .that()
+            .resideInAPackage("..export..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("..ingestion..")
             .allowEmptyShould(true);
 
     /** No package cycles between the top-level slices. */
@@ -133,7 +143,7 @@ class ArchitectureTest {
     static final ArchRule operatorEndpointsDeclarePermission = ArchRuleDefinition.methods()
             .that()
             .areDeclaredInClassesThat()
-            .resideInAPackage("..export.api..")
+            .resideInAnyPackage("..export.api..", "..ingestion.api..")
             .and()
             .areAnnotatedWith(Operation.class)
             .should()
