@@ -301,6 +301,24 @@ public class FieldRecommendationRepositoryIT {
                 List.of(new HistoryEntry("APPROVE", "reviewer@example.com", decidedAt, null)), stored.reviewHistory());
     }
 
+    /**
+     * With a second vendor the greatest batch id is not the newest batch: {@code -acme-2026-11} sorts
+     * before {@code -candor-2026-10}. "Latest" is the batch whose documents were staged last.
+     */
+    @Test
+    void latestBatchIsTheNewestStagedNotTheGreatestId() {
+        String tenant = "frrepo-latest";
+        String october = batchId(tenant, 10);
+        String november = Ids.batchId(tenant, "acme", java.time.YearMonth.of(2026, 11), 1);
+        Assertions.assertTrue(november.compareTo(october) < 0, "the newer batch has the smaller id");
+        repository.upsertAll(List.of(
+                recommendation(tenant, october, "cert-1", "1000000001", "loc-1", "phone", STAGED),
+                recommendation(tenant, november, "cert-1", "1000000001", "loc-1", "fax", STAGED.plusSeconds(86_400))));
+
+        Assertions.assertEquals(List.of(november), batchesOf(repository.forNpi(tenant, "1000000001", null, 10)));
+        Assertions.assertEquals(List.of(november), batchesOf(repository.forPractitioner(tenant, "cert-1", null, 10)));
+    }
+
     @Test
     void forNpiWithoutBatchTakesTheLatest() {
         String tenant = "frrepo-npi";

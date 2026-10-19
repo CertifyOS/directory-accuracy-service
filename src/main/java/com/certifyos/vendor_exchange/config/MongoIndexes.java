@@ -155,6 +155,22 @@ public class MongoIndexes {
                         new IndexOptions()
                                 .name("field_recs_open_list_any_field")
                                 .partialFilterExpression(openStates));
+        // the list of decided rows (approved, rejected, in or after release): the review API takes any
+        // status, and the open-state indexes above cannot serve these
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "reviewStatus", "stagedAt", "_id"),
+                        new IndexOptions()
+                                .name("field_recs_decided_list")
+                                .partialFilterExpression(Filters.in(
+                                        "reviewStatus",
+                                        "APPROVED",
+                                        "REJECTED",
+                                        "RELEASE_REQUESTED",
+                                        "RELEASING",
+                                        "RELEASED",
+                                        "RELEASE_FAILED")));
 
         // vendor_rejected_values: the only TTL index in the service (design D16, plan P4)
         collections

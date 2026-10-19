@@ -164,6 +164,26 @@ public class MongoIndexesIT {
         Assertions.assertEquals(
                 openStates,
                 recommendations.get("field_recs_open_list_any_field").get("partialFilterExpression", Document.class));
+        assertKey(
+                recommendations,
+                "field_recs_decided_list",
+                new Document("tenantId", 1)
+                        .append("reviewStatus", 1)
+                        .append("stagedAt", 1)
+                        .append("_id", 1));
+        Assertions.assertEquals(
+                new Document(
+                        "reviewStatus",
+                        new Document(
+                                "$in",
+                                List.of(
+                                        "APPROVED",
+                                        "REJECTED",
+                                        "RELEASE_REQUESTED",
+                                        "RELEASING",
+                                        "RELEASED",
+                                        "RELEASE_FAILED"))),
+                recommendations.get("field_recs_decided_list").get("partialFilterExpression", Document.class));
 
         Map<String, Document> rejected = byName(collections.rejectedValues());
         assertKey(rejected, "rejected_values_ttl", new Document("expiresAt", 1));
