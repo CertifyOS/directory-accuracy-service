@@ -9,9 +9,12 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 /**
  * {@link ArchiveStore} over Cloud Storage with Application Default Credentials: a server-side copy
- * of the source read by generation, with {@code ifSourceGenerationMatch} on the source and {@code
- * ifGenerationMatch=0} on the target. The client is built on first use so a deployment without
- * credentials (or a test) boots; the first copy is where a missing grant shows.
+ * of the source read by generation, with {@code ifGenerationMatch=0} on the target. The source
+ * carries no {@code ifSourceGenerationMatch}: the generation on the source id already pins the
+ * bytes, and the precondition is checked against the live generation, so a vendor overwrite in a
+ * versioned bucket would refuse a copy of a generation that still exists. The client is built on
+ * first use so a deployment without credentials (or a test) boots; the first copy is where a
+ * missing grant shows.
  */
 @ApplicationScoped
 public class GcsArchiveStore implements ArchiveStore {
@@ -37,7 +40,6 @@ public class GcsArchiveStore implements ArchiveStore {
         String path = "gs://" + targetBucket + "/" + targetObject;
         Storage.CopyRequest request = Storage.CopyRequest.newBuilder()
                 .setSource(source)
-                .setSourceOptions(Storage.BlobSourceOption.generationMatch())
                 .setTarget(target, Storage.BlobTargetOption.doesNotExist())
                 .build();
         try {
@@ -59,7 +61,7 @@ public class GcsArchiveStore implements ArchiveStore {
             }
             Blob existing = storage().get(target);
             if (existing == null) {
-                // The refused precondition was the source's, not the target's: nothing is archived.
+                // Only the target carries a precondition, so a 412 with no target is unexpected: retry.
                 throw failure;
             }
             return new Copied(path, size(existing, path), true);

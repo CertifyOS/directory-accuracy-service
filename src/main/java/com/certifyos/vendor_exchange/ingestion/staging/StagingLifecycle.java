@@ -111,14 +111,18 @@ public class StagingLifecycle {
     /**
      * One chunk is written: its counts are added to the entry and the checkpoint moves to its last
      * row, still in {@code STAGING}. Every disposition and every written count is incremented, zeros
-     * included. No event (design: staging writes no per-chunk or per-field event).
+     * included. The write is a compare-and-set on the checkpoint the chunk resumed from, so two runs
+     * of one upload that overlap (JobRunr re-running a job it thought orphaned) cannot both add the
+     * same chunk; the late one matches nothing and stops. No event (design: staging writes no
+     * per-chunk or per-field event).
      *
      * @param located the entry as the job read it
+     * @param from the checkpoint the chunk resumed from, null for the first chunk
      * @param progress the chunk's counts and last row
      * @param now the time of the write
-     * @return true when the entry was still {@code STAGING}
+     * @return true when the entry was still {@code STAGING} at {@code from}
      */
-    public boolean chunkCheckpoint(Located located, RowStager.Progress progress, Instant now) {
+    public boolean chunkCheckpoint(Located located, String from, RowStager.Progress progress, Instant now) {
         List<Bson> updates = new ArrayList<>();
         for (RowDisposition disposition : RowDisposition.values()) {
             updates.add(Updates.inc(
@@ -133,11 +137,12 @@ public class StagingLifecycle {
                 InboundFileRepository.entry("written.practitionerFieldDisagreements"), progress.disagreements()));
         updates.add(Updates.inc(InboundFileRepository.entry("checkpoint.chunks"), 1L));
         updates.add(Updates.set(InboundFileRepository.entry("checkpoint.after"), progress.after()));
-        return transactions.run(session -> inbound.updateInState(
+        return transactions.run(session -> inbound.updateInStateAt(
                 session,
                 located.batch().id(),
                 located.entry().uploadId(),
                 InboundFileState.STAGING,
+                from,
                 now,
                 Updates.combine(updates)));
     }

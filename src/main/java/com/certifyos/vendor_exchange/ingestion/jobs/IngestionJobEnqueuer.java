@@ -69,9 +69,20 @@ public class IngestionJobEnqueuer {
         return id;
     }
 
+    /**
+     * The stage-rows job id of an upload attempt, the one place it is computed.
+     *
+     * @param uploadId the upload
+     * @param attempt the entry attempt
+     * @return the deterministic job id
+     */
+    public static UUID stageRowsId(String uploadId, int attempt) {
+        return JobIds.of(StageRowsJob.NAME, uploadId, attempt);
+    }
+
     /** Enqueues the stage-rows job for a parsed upload attempt and returns its id. */
     public UUID stageRows(String exportBatchId, String uploadId, int attempt) {
-        UUID id = JobIds.of(StageRowsJob.NAME, uploadId, attempt);
+        UUID id = stageRowsId(uploadId, attempt);
         scheduler.enqueue(id, new StageRowsJobRequest(exportBatchId, uploadId, attempt));
         return id;
     }

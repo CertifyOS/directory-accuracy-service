@@ -138,6 +138,15 @@ public class CompletionHandler {
             throw ProblemException.unavailable(
                     ARCHIVING_NOT_COMMITTED, "the ingestion request is not committed yet; deliver again later");
         }
+        if (state == InboundFileState.PARSED && !stageJobRecorded(located)) {
+            // A redelivery after a delivery that committed PARSED and failed before the stage job
+            // was recorded: the id is deterministic, so the enqueue is a no-op when the job exists.
+            LOG.infof(
+                    "completion %s for %s upload %s is PARSED without its stage job; handed over again",
+                    messageId, located.batch().id(), located.entry().uploadId());
+            handToStaging(located);
+            return Outcome.STATE_PASSED;
+        }
         if (state != InboundFileState.INGESTION_REQUESTED) {
             LOG.infof(
                     "completion %s for %s upload %s in %s acknowledged without effect",
@@ -154,8 +163,11 @@ public class CompletionHandler {
             if (!lifecycle.parsed(located, event.counts(), status, EVENT, now)) {
                 return Outcome.STATE_PASSED;
             }
-            deleteDeadlineCheck(located);
+            // The stage job first: a failure here answers 500 and the redelivery finds the entry
+            // PARSED and hands it over again. The delete is best effort, since a surviving deadline
+            // check exits as a no-op on a PARSED entry.
             handToStaging(located);
+            deleteDeadlineCheckQuietly(located);
             return Outcome.PARSED;
         }
         if (INVALID.equals(status)) {
@@ -203,6 +215,25 @@ public class CompletionHandler {
             return;
         }
         enqueuer.delete(deadline);
+    }
+
+    private static boolean stageJobRecorded(Located located) {
+        UUID stage = IngestionJobEnqueuer.stageRowsId(
+                located.entry().uploadId(), located.entry().attempt());
+        return stage.toString().equals(located.entry().jobId());
+    }
+
+    /** {@link #deleteDeadlineCheck} after the stage hand-over, where a failure must not undo the 204. */
+    private void deleteDeadlineCheckQuietly(Located located) {
+        try {
+            deleteDeadlineCheck(located);
+        } catch (RuntimeException exception) {
+            LOG.warnf(
+                    exception,
+                    "%s upload %s: deadline check not deleted; it will exit as a no-op on the PARSED entry",
+                    located.batch().id(),
+                    located.entry().uploadId());
+        }
     }
 
     /**

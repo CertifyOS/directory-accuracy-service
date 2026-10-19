@@ -12,6 +12,7 @@ import com.certifyos.vendor_exchange.export.batch.ExportNpiRepository;
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
 import com.certifyos.vendor_exchange.export.jobs.EgressFixtures;
 import com.certifyos.vendor_exchange.export.jobs.JobIds;
+import com.certifyos.vendor_exchange.http.ProblemException;
 import com.certifyos.vendor_exchange.ingestion.InboundFixtures;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository;
@@ -245,6 +246,25 @@ class ArrivalHandlerIT {
     }
 
     @Test
+    void aNameWithSpacesIsUnmatchedNotUnreadable() {
+        String objectName = "to/arrival-spaces/Copy of results.csv";
+        String uploadId = Ids.uploadId(InboundFixtures.VENDOR_BUCKET, objectName, "7502");
+        double unreadable = ignored("UNREADABLE");
+
+        Assertions.assertEquals(
+                ArrivalHandler.Outcome.UNMATCHED,
+                handler.handle(message("m-spaces", attributes(objectName, "7502", FINALIZE))));
+
+        UnmatchedUpload row = unmatched.find(uploadId).orElseThrow();
+        Assertions.assertEquals(InboundNames.UNPARSEABLE_NAME, row.reason());
+        Assertions.assertEquals("arrival-spaces", row.folderTenant());
+        Assertions.assertEquals(
+                objectName,
+                unmatchedEvent(uploadId).get("detail", Document.class).getString("objectName"));
+        Assertions.assertEquals(unreadable, ignored("UNREADABLE"), "a readable identity is not counted unreadable");
+    }
+
+    @Test
     void badNameIsUnmatched() {
         String objectName = "to/arrival-bad/notes.txt";
         String uploadId = Ids.uploadId(InboundFixtures.VENDOR_BUCKET, objectName, "7501");
@@ -407,7 +427,7 @@ class ArrivalHandlerIT {
     }
 
     @Test
-    void disabledServiceAcknowledgesWithoutWriting() {
+    void disabledServiceRefusesForRedeliveryWithoutWriting() {
         String tenant = "arrival-disabled";
         ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, tenant);
         VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
@@ -416,9 +436,12 @@ class ArrivalHandlerIT {
         ArrivalHandler off = new ArrivalHandler(batches, lifecycle, unmatchedOperations, requests, disabled, clock);
         String badName = "to/" + tenant + "/notes.txt";
 
-        Assertions.assertEquals(ArrivalHandler.Outcome.DISABLED, off.handle(finalize(tenant, batch.id(), "8001")));
-        Assertions.assertEquals(
-                ArrivalHandler.Outcome.DISABLED, off.handle(message("m-off", attributes(badName, "8002", FINALIZE))));
+        for (PubSubPushMessage.Message delivery : List.of(
+                finalize(tenant, batch.id(), "8001"), message("m-off", attributes(badName, "8002", FINALIZE)))) {
+            ProblemException refused = Assertions.assertThrows(ProblemException.class, () -> off.handle(delivery));
+            Assertions.assertEquals(503, refused.status());
+            Assertions.assertEquals(ArrivalHandler.SERVICE_DISABLED, refused.code());
+        }
 
         ExportBatch after = batches.find(batch.id()).orElseThrow();
         Assertions.assertEquals(0, entries(batch.id()));

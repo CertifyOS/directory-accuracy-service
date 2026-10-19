@@ -367,8 +367,8 @@ class StageRowsJobIT {
         List<FileIngestionRow> file = designFile();
         Instant now = Instant.parse("2026-10-15T09:15:00Z");
 
-        RowStager.Progress first =
-                stager.stageChunk(located(seeded), file.subList(0, 2), now).orElseThrow();
+        RowStager.Progress first = stager.stageChunk(located(seeded), null, file.subList(0, 2), now)
+                .orElseThrow();
 
         Assertions.assertEquals(cursor(2), first.after());
         Assertions.assertEquals(4L, first.recommendations());
@@ -377,8 +377,8 @@ class StageRowsJobIT {
         Assertions.assertEquals(dispositions(Map.of(RowDisposition.STAGED, 2L)), afterFirst.dispositions());
         Assertions.assertEquals(written(4, 2, 2L * DesignRows.UNVERIFIED_PER_ROW, 0), afterFirst.written());
 
-        RowStager.Progress second =
-                stager.stageChunk(located(seeded), file.subList(2, 4), now).orElseThrow();
+        RowStager.Progress second = stager.stageChunk(located(seeded), cursor(2), file.subList(2, 4), now)
+                .orElseThrow();
 
         Assertions.assertEquals(cursor(4), second.after());
         Assertions.assertEquals(1L, second.recommendations(), "row 3's practice name; row 4's first name exists");
@@ -394,12 +394,31 @@ class StageRowsJobIT {
     }
 
     @Test
+    void anOverlappingRunOfTheSameChunkIsNotCountedTwice() {
+        String tenant = "stage-overlap";
+        Seeded seeded = seed(tenant, InboundFileState.STAGING, 5);
+        List<FileIngestionRow> file = designFile();
+        Instant now = Instant.parse("2026-10-15T09:15:00Z");
+        stager.stageChunk(located(seeded), null, file.subList(0, 2), now).orElseThrow();
+        InboundFile once = entry(seeded);
+
+        // a second run that also started from no checkpoint stages the same chunk late
+        Optional<RowStager.Progress> late = stager.stageChunk(located(seeded), null, file.subList(0, 2), now);
+
+        Assertions.assertTrue(late.isEmpty(), "the checkpoint moved past where the late run started");
+        InboundFile after = entry(seeded);
+        Assertions.assertEquals(once.checkpoint(), after.checkpoint());
+        Assertions.assertEquals(once.dispositions(), after.dispositions());
+        Assertions.assertEquals(once.written(), after.written());
+    }
+
+    @Test
     void chunkOfAnEntryThatLeftStagingIsNotCheckpointed() {
         String tenant = "stage-moved";
         Seeded seeded = seed(tenant, InboundFileState.FAILED, 5);
 
-        Optional<RowStager.Progress> progress =
-                stager.stageChunk(located(seeded), designFile().subList(0, 2), Instant.parse("2026-10-15T09:15:00Z"));
+        Optional<RowStager.Progress> progress = stager.stageChunk(
+                located(seeded), null, designFile().subList(0, 2), Instant.parse("2026-10-15T09:15:00Z"));
 
         Assertions.assertTrue(progress.isEmpty());
         Assertions.assertNull(entry(seeded).checkpoint());
@@ -452,7 +471,8 @@ class StageRowsJobIT {
                 .doThrow(new IllegalStateException("worker died after the bulk write"))
                 .doCallRealMethod()
                 .when(stagingLifecycle)
-                .chunkCheckpoint(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
+                .chunkCheckpoint(
+                        ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
 
         Assertions.assertThrows(IllegalStateException.class, () -> run(seeded));
 
@@ -654,7 +674,8 @@ class StageRowsJobIT {
                     return invocation.callRealMethod();
                 })
                 .when(stagingLifecycle)
-                .chunkCheckpoint(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
+                .chunkCheckpoint(
+                        ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
 
         try (InputStream probe = fileIngestion.rows(tenant, "vendor-ingestion", ingestionId(tenant), null)) {
             Assertions.assertFalse(

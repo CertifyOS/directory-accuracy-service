@@ -89,6 +89,19 @@ class IdsTest {
     }
 
     @Test
+    void uploadIdEscapesWhitespacePipeAndPercentInTheObjectName() {
+        Assertions.assertEquals(
+                "bkt|to/org-xyz/Copy%20of%20results.csv|1", Ids.uploadId("bkt", "to/org-xyz/Copy of results.csv", "1"));
+        Assertions.assertEquals("bkt|a%7Cb%25c%09d%C2%A0e|1", Ids.uploadId("bkt", "a|b%c\td\u00a0e", "1"));
+        Assertions.assertNotEquals(Ids.uploadId("bkt", "a b", "1"), Ids.uploadId("bkt", "a%20b", "1"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("bkt", " ", "1"));
+        for (String name : new String[] {"plain/name.csv", "Copy of results.csv", "a|b%c\td\u00a0e", "tést 😀.csv"}) {
+            String leg = Ids.uploadId("bkt", name, "1").split("\\|", -1)[1];
+            Assertions.assertEquals(name, Ids.objectNameOf(leg), "the escape is undone exactly");
+        }
+    }
+
+    @Test
     void rejectedValueIdEndsWithTheSha256OfTheNormalisedValue() throws Exception {
         String expected = java.util.HexFormat.of()
                 .formatHex(java.security.MessageDigest.getInstance("SHA-256")
@@ -137,7 +150,7 @@ class IdsTest {
 
     @Test
     void aLegWithWhitespaceIsRefusedSoTheAuditLineKeepsItsKeyValueGrammar() {
-        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b", "to/f 1.csv", "1"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b c", "o", "1"));
         Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b", "o", "1\n"));
         Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.externalRef("b\tx", "1"));
         Assertions.assertThrows(
