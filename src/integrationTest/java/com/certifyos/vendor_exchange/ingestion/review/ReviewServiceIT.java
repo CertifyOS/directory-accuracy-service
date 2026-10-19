@@ -23,6 +23,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.junit.mockito.InjectSpy;
 import jakarta.inject.Inject;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -37,6 +38,8 @@ import org.eclipse.microprofile.context.ManagedExecutor;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 
 /**
  * Reviewer decisions through {@link ReviewService}: one guarded update and one {@code FIELD_*} event
@@ -75,6 +78,9 @@ class ReviewServiceIT {
 
     @Inject
     ManagedExecutor executor;
+
+    @InjectSpy
+    RejectedValueRepository rejectedValues;
 
     @Test
     void approveFromPendingWritesHistoryAndEvent() {
@@ -352,6 +358,78 @@ class ReviewServiceIT {
                 ReviewStatus.PENDING,
                 repository.find(theirs, doc.id()).orElseThrow().reviewStatus());
         Assertions.assertEquals(List.of(), audit.trailForField(theirs, doc.id(), 10));
+    }
+
+    @Test
+    void rejectWritesTheRejectedValue() throws Exception {
+        FieldRecommendation doc = stage(11, "cert-000123", "loc-7781", "phone");
+
+        FieldRecommendation rejected = service.decide(
+                TENANT,
+                new DecisionRequest(doc.id(), Action.REJECT, "Office confirmed old number still active", 1L),
+                REVIEWER);
+
+        String sha = java.util.HexFormat.of()
+                .formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest("3036790177".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        String expectedId = TENANT + "|cert-000123|loc-7781|phone|" + sha;
+        RejectedValue row = rejectedValues.find(TENANT, expectedId).orElseThrow();
+        Assertions.assertEquals("3036790177", row.normalizedValue());
+        Assertions.assertEquals("(303) 679-0177", row.rawValue());
+        Assertions.assertEquals(1, row.normalizationVersion());
+        Assertions.assertEquals(1L, row.rejectionCount());
+        Assertions.assertEquals(rejected.updatedAt(), row.lastRejectedAt(), "the decision time");
+        Assertions.assertEquals(
+                List.of(new RejectedValue.Rejection(
+                        doc.exportBatchId(),
+                        REVIEWER,
+                        rejected.updatedAt(),
+                        "Office confirmed old number still active")),
+                row.rejections());
+        Assertions.assertEquals(
+                rejected.updatedAt()
+                        .atZone(java.time.ZoneOffset.UTC)
+                        .plusMonths(12)
+                        .toInstant(),
+                row.expiresAt());
+        AuditEvent event = audit.trailForField(TENANT, doc.id(), 10).get(0);
+        Assertions.assertEquals(AuditEventType.FIELD_REJECTED, event.type());
+        Assertions.assertEquals(expectedId, event.detail().get("rejectedValueId"));
+        Assertions.assertEquals(1L, ((Number) event.detail().get("rejectionCount")).longValue());
+
+        FieldRecommendation approved = stage(12, "cert-000123", "loc-7781", "fax");
+        service.decide(TENANT, new DecisionRequest(approved.id(), Action.APPROVE, null, 1L), REVIEWER);
+        Assertions.assertFalse(
+                audit.trailForField(TENANT, approved.id(), 10).get(0).detail().containsKey("rejectedValueId"),
+                "only a rejection touches the memory");
+        Assertions.assertEquals(
+                1, rejectedValues.forPractitioner(TENANT, "cert-000123", 10).size());
+    }
+
+    @Test
+    void rejectRollsBackWhenTheMemoryWriteFails() {
+        FieldRecommendation doc = stage(13, "cert-rb1", "loc-1", "phone");
+        Mockito.doThrow(new IllegalStateException("memory down"))
+                .when(rejectedValues)
+                .upsert(
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.anyInt());
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> service.decide(TENANT, new DecisionRequest(doc.id(), Action.REJECT, "wrong", 1L), REVIEWER));
+
+        FieldRecommendation stored = repository.find(TENANT, doc.id()).orElseThrow();
+        Assertions.assertEquals(
+                ReviewStatus.PENDING, stored.reviewStatus(), "the decision rolled back with the memory");
+        Assertions.assertEquals(1L, stored.version());
+        Assertions.assertEquals(List.of(), stored.reviewHistory());
+        Assertions.assertEquals(List.of(), audit.trailForField(TENANT, doc.id(), 10), "no event");
+        Assertions.assertEquals(List.of(), rejectedValues.forPractitioner(TENANT, "cert-rb1", 10));
     }
 
     // helpers
