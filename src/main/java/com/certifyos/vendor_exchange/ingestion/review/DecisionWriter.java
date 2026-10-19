@@ -3,6 +3,7 @@ package com.certifyos.vendor_exchange.ingestion.review;
 import com.certifyos.vendor_exchange.audit.AuditEvent;
 import com.certifyos.vendor_exchange.audit.AuditEventType;
 import com.certifyos.vendor_exchange.audit.AuditRepository;
+import com.certifyos.vendor_exchange.config.VendorExchangeConfig;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.vendor_exchange.ingestion.staging.ReviewStatus;
@@ -17,8 +18,10 @@ import java.util.Set;
 
 /**
  * The write half of a reviewer decision: one transaction holding the guarded update of the field
- * recommendation and its {@code FIELD_*} event. If the guard matches nothing (another writer moved
- * the document, or the version is stale) nothing is written and the caller answers 409.
+ * recommendation, on {@code REJECT} the upsert of the rejected value into {@code
+ * vendor_rejected_values} (design step 7), and its {@code FIELD_*} event. If the guard matches
+ * nothing (another writer moved the document, or the version is stale) nothing is written and the
+ * caller answers 409; if the memory write fails, the decision rolls back with it.
  */
 @ApplicationScoped
 public class DecisionWriter {
@@ -26,12 +29,20 @@ public class DecisionWriter {
     private final Transactions transactions;
     private final FieldRecommendationRepository recommendations;
     private final AuditRepository audit;
+    private final RejectedValueRepository rejectedValues;
+    private final VendorExchangeConfig config;
 
     public DecisionWriter(
-            Transactions transactions, FieldRecommendationRepository recommendations, AuditRepository audit) {
+            Transactions transactions,
+            FieldRecommendationRepository recommendations,
+            AuditRepository audit,
+            RejectedValueRepository rejectedValues,
+            VendorExchangeConfig config) {
         this.transactions = transactions;
         this.recommendations = recommendations;
         this.audit = audit;
+        this.rejectedValues = rejectedValues;
+        this.config = config;
     }
 
     /**
@@ -69,17 +80,32 @@ public class DecisionWriter {
         if (!moved) {
             return false;
         }
-        audit.write(session, event(current, action, comment, actor, now));
+        RejectedValueRepository.Upserted remembered = action == Action.REJECT
+                ? rejectedValues.upsert(
+                        session,
+                        current,
+                        actor,
+                        comment,
+                        now,
+                        config.ingestion().rejectedValueTtlMonths())
+                : null;
+        audit.write(session, event(current, action, comment, actor, now, remembered));
         return true;
     }
 
     /**
      * The event of a decision. Detail: the field, the location for a location-level field, the state
      * the decision started from, and the version the decision produced (the version the document now
-     * carries); the comment when there is one. A rejection also names {@code rejectedValueId} and
-     * {@code rejectionCount}, null until the rejected-value memory exists.
+     * carries); the comment when there is one. A rejection also carries the rejected-value row it
+     * landed on, {@code rejectedValueId} and {@code rejectionCount}.
      */
-    static AuditEvent event(FieldRecommendation current, Action action, String comment, String actor, Instant now) {
+    static AuditEvent event(
+            FieldRecommendation current,
+            Action action,
+            String comment,
+            String actor,
+            Instant now,
+            RejectedValueRepository.Upserted remembered) {
         AuditEvent.Builder builder = AuditEvent.of(eventType(action), current.tenantId(), current.source())
                 .batch(current.exportBatchId())
                 .upload(
@@ -97,7 +123,8 @@ public class DecisionWriter {
                 .detail("version", current.version() + 1)
                 .detail("comment", comment);
         if (action == Action.REJECT) {
-            builder.detail("rejectedValueId", null).detail("rejectionCount", null);
+            builder.detail("rejectedValueId", remembered == null ? null : remembered.id())
+                    .detail("rejectionCount", remembered == null ? null : remembered.rejectionCount());
         }
         return builder.build();
     }
