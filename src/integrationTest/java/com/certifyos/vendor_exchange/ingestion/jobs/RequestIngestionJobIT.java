@@ -422,6 +422,7 @@ class RequestIngestionJobIT {
         WebApplicationException down = Assertions.assertThrows(WebApplicationException.class, () -> run(seeded));
 
         Assertions.assertEquals(503, down.getResponse().getStatus());
+        Assertions.assertFalse(down instanceof RegisterClientErrorException, "a 5xx is not a client error");
         InboundFile after = entry(seeded);
         Assertions.assertEquals(InboundFileState.ARCHIVING, after.state(), "left for the JobRunr retry");
         Assertions.assertEquals(archivePath(seeded), after.archivePath(), "the archive is kept");
@@ -434,9 +435,13 @@ class RequestIngestionJobIT {
         archiveCopies(seeded, false);
         stubRegister(seeded, 400, "{\"code\":\"SOURCE_UNREADABLE\"}");
 
-        WebApplicationException refused = Assertions.assertThrows(WebApplicationException.class, () -> run(seeded));
+        // A typed exception, so the final-failure filter can tell a register 4xx (SOURCE_UNREADABLE)
+        // from every other exhausted retry.
+        RegisterClientErrorException refused =
+                Assertions.assertThrows(RegisterClientErrorException.class, () -> run(seeded));
 
         Assertions.assertEquals(400, refused.getResponse().getStatus());
+        Assertions.assertEquals("file-ingestion answered register with HTTP 400", refused.getMessage());
         Assertions.assertEquals(InboundFileState.ARCHIVING, entry(seeded).state(), "left for the JobRunr retry");
     }
 

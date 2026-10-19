@@ -1,6 +1,7 @@
 package com.certifyos.vendor_exchange.ingestion.jobs;
 
 import com.certifyos.vendor_exchange.export.jobs.JobLogContext;
+import java.util.UUID;
 import org.jboss.logging.MDC;
 import org.jobrunr.jobs.context.JobContext;
 
@@ -43,6 +44,22 @@ public final class IngestionLogContext implements AutoCloseable {
         put(EXPORT_BATCH_ID, exportBatchId);
         put(UPLOAD_ID, uploadId);
         putJob(job);
+        return new IngestionLogContext();
+    }
+
+    /**
+     * Opens the context for work done on behalf of an inbound file job outside its run (the
+     * final-failure filter, after the job's own context has closed), naming that job.
+     *
+     * @param exportBatchId the batch
+     * @param uploadId the upload
+     * @param jobId the job the work is about
+     * @return the context to close when the work ends
+     */
+    public static IngestionLogContext openFor(String exportBatchId, String uploadId, UUID jobId) {
+        put(EXPORT_BATCH_ID, exportBatchId);
+        put(UPLOAD_ID, uploadId);
+        put(JOB_ID, jobId == null ? null : jobId.toString());
         return new IngestionLogContext();
     }
 
