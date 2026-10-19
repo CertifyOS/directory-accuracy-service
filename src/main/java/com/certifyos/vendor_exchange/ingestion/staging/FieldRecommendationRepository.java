@@ -238,8 +238,7 @@ public class FieldRecommendationRepository {
      *
      * @param tenantId the tenant
      * @param certifyPractitionerId the practitioner
-     * @param exportBatchId the batch, or null for the practitioner's latest batch: the batch of its
-     *     newest staged document
+     * @param exportBatchId the batch, or null for the practitioner's latest (its newest staged document's)
      * @param limit the most documents to return
      * @return the documents by id, empty when the practitioner has none
      */
@@ -253,8 +252,7 @@ public class FieldRecommendationRepository {
      *
      * @param tenantId the tenant
      * @param npi the NPI
-     * @param exportBatchId the batch, or null for the NPI's latest batch: the batch of its newest staged
-     *     document
+     * @param exportBatchId the batch, or null for the NPI's latest (its newest staged document's batch)
      * @param limit the most documents to return
      * @return the documents by id, empty when the NPI has none
      */
@@ -268,8 +266,6 @@ public class FieldRecommendationRepository {
         Bson owner = Filters.and(Filters.eq("tenantId", tenantId), Filters.eq(path, value));
         String batch = exportBatchId;
         if (batch == null) {
-            // The newest staged document names the latest batch. Batch ids sort by tenant, vendor and
-            // period, so their maximum would follow the vendor's name once a second vendor exists.
             Document latest = recommendations()
                     .find(owner)
                     .sort(Sorts.descending("stagedAt", "_id"))
