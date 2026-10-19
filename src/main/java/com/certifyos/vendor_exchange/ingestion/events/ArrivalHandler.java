@@ -6,20 +6,15 @@ import com.certifyos.vendor_exchange.export.batch.ExportBatch;
 import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
-import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository;
-import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
-import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedOperations;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedUpload;
-import com.certifyos.vendor_exchange.ingestion.jobs.IngestionJobEnqueuer;
 import io.quarkus.runtime.Startup;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.regex.Pattern;
 import org.jboss.logging.Logger;
 
@@ -50,19 +45,17 @@ public class ArrivalHandler {
     private static final Logger LOG = Logger.getLogger(ArrivalHandler.class);
 
     private final ExportBatchRepository batches;
-    private final InboundFileRepository inbound;
     private final InboundLifecycle lifecycle;
     private final UnmatchedOperations unmatched;
-    private final IngestionJobEnqueuer enqueuer;
+    private final IngestionRequests requests;
     private final VendorExchangeConfig cfg;
     private final Clock clock;
 
     public ArrivalHandler(
             ExportBatchRepository batches,
-            InboundFileRepository inbound,
             InboundLifecycle lifecycle,
             UnmatchedOperations unmatched,
-            IngestionJobEnqueuer enqueuer,
+            IngestionRequests requests,
             VendorExchangeConfig cfg,
             Clock clock) {
         String signal = cfg.ingestion().completenessSignal();
@@ -71,10 +64,9 @@ public class ArrivalHandler {
                     + DATA_FILE + " is implemented");
         }
         this.batches = batches;
-        this.inbound = inbound;
         this.lifecycle = lifecycle;
         this.unmatched = unmatched;
-        this.enqueuer = enqueuer;
+        this.requests = requests;
         this.cfg = cfg;
         this.clock = clock;
     }
@@ -170,21 +162,11 @@ public class ArrivalHandler {
 
     /**
      * Enqueues the request-ingestion job for a {@code RECEIVED} entry that has no job yet, then
-     * records the job id on it. Runs after the claim's commit, never inside a transaction. Two
-     * deliveries racing here enqueue the same deterministic id, which JobRunr treats as one job.
+     * records the job id on it ({@link IngestionRequests}, shared with the operator attach). Runs
+     * after the claim's commit, never inside a transaction.
      */
     private void requestIngestion(String uploadId, Instant now) {
-        Located located = inbound.findByUploadId(uploadId)
-                .orElseThrow(() -> new IllegalStateException("upload " + uploadId + " is claimed but not found"));
-        InboundFile entry = located.entry();
-        if (entry.state() != InboundFileState.RECEIVED || entry.jobId() != null) {
-            LOG.infof(
-                    "%s upload %s is %s with job %s; nothing to enqueue",
-                    located.batch().id(), uploadId, entry.state(), entry.jobId());
-            return;
-        }
-        UUID jobId = enqueuer.requestIngestion(located.batch().id(), uploadId, entry.attempt());
-        lifecycle.jobRecorded(located, jobId, now);
+        requests.requestIfUnowned(uploadId, now);
     }
 
     private Outcome unmatched(

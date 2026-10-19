@@ -114,9 +114,11 @@ public class UnmatchedOperations {
      * transaction holds the claim ({@link InboundLifecycle#claimIn} with the operator as actor), the
      * row resolved {@code ATTACHED} and {@code INBOUND_UPLOAD_ATTACHED}; the arrival metric and the
      * request-ingestion enqueue follow the commit. The claim is replayed from the row: bucket, object
-     * and generation from its upload id, its {@code receivedAt} as the event time. An upload that is
-     * on the batch already ({@code ALREADY_CLAIMED}) still resolves the row; one that finds the batch
-     * claimed by another upload is {@code DUPLICATE_LOGGED} and is never processed.
+     * and generation from its upload id, its {@code receivedAt} as the event time. An upload that
+     * already sits on any batch is refused before the transaction, so the operator discards the row
+     * instead; one that a racing delivery claims on the target batch meanwhile ({@code
+     * ALREADY_CLAIMED}) still resolves the row; one that finds the batch claimed by another upload is
+     * {@code DUPLICATE_LOGGED} and is never processed.
      *
      * @param tenantId the caller's tenant
      * @param uploadId the unmatched upload
@@ -127,8 +129,9 @@ public class UnmatchedOperations {
      * @return the upload, the entry's state and the job this call enqueued
      * @throws ProblemException 404 {@code UNMATCHED_NOT_FOUND} for a missing row or one in another
      *     tenant's folder, 404 {@code BATCH_NOT_FOUND}, 409 {@code ALREADY_RESOLVED}, 409 {@code
-     *     ATTACH_NOT_ALLOWED} for a batch that is not delivered or moved under the request, 400 {@code
-     *     REASON_REQUIRED}, or 400 {@code INVALID_REQUEST} without a batch id
+     *     ATTACH_NOT_ALLOWED} for a batch that is not delivered or moved under the request, 409 {@code
+     *     ALREADY_CLAIMED} for an upload already on a batch, 400 {@code REASON_REQUIRED}, or 400
+     *     {@code INVALID_REQUEST} without a batch id
      */
     public Attached attach(
             String tenantId, String uploadId, String exportBatchId, String reason, String actor, Instant now) {
@@ -143,6 +146,14 @@ public class UnmatchedOperations {
                     "batch " + batch.id() + " is " + batch.state() + "; only a delivered batch takes an upload");
         }
         String why = requireReason(reason);
+        // The claim filter checks only the target batch, and the upload id index is not unique: an
+        // upload a later delivery claimed on its named batch would otherwise sit on two batches.
+        requests.claimed(uploadId).ifPresent(located -> {
+            throw ProblemException.conflict(
+                    "ALREADY_CLAIMED",
+                    "upload " + uploadId + " is already on batch "
+                            + located.batch().id());
+        });
         InboundFile entry = InboundFile.received(arrivalOf(row), nameOf(row), now);
         UnmatchedUpload.Resolution resolution =
                 new UnmatchedUpload.Resolution(UnmatchedUpload.ATTACHED, batch.id(), why, actor, now);

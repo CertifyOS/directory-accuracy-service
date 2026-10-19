@@ -15,8 +15,7 @@ class ArrivalHandlerTest {
         Mockito.when(cfg.ingestion().completenessSignal()).thenReturn("MANIFEST");
 
         IllegalStateException refused = Assertions.assertThrows(
-                IllegalStateException.class,
-                () -> new ArrivalHandler(null, null, null, null, null, cfg, Clock.systemUTC()));
+                IllegalStateException.class, () -> new ArrivalHandler(null, null, null, null, cfg, Clock.systemUTC()));
 
         Assertions.assertTrue(refused.getMessage().contains("MANIFEST"));
     }

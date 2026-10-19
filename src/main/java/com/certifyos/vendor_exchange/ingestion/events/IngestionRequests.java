@@ -8,14 +8,15 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
 import com.certifyos.vendor_exchange.ingestion.jobs.IngestionJobEnqueuer;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.jboss.logging.Logger;
 
 /**
  * The step after a claim commits: hand a {@code RECEIVED} entry that has no job yet to the
- * request-ingestion job, then record the job id on it. Never inside a transaction. The same sequence
- * as the arrival handler's, for the operator attach. Two callers racing here enqueue the same
- * deterministic id, which JobRunr treats as one job.
+ * request-ingestion job, then record the job id on it. Never inside a transaction. The one
+ * implementation for both claim paths, the arrival handler and the operator attach. Two callers
+ * racing here enqueue the same deterministic id, which JobRunr treats as one job.
  */
 @ApplicationScoped
 public class IngestionRequests {
@@ -39,6 +40,17 @@ public class IngestionRequests {
      * @param jobId the job this call enqueued, null when the entry was not {@code RECEIVED} or already had a job
      */
     public record Requested(Located located, UUID jobId) {}
+
+    /**
+     * The entry an upload is claimed as, on whichever batch holds it, so a claim path can refuse an
+     * upload that already sits on another batch before it claims.
+     *
+     * @param uploadId the upload
+     * @return the entry and its batch, or empty when no batch holds the upload
+     */
+    public Optional<Located> claimed(String uploadId) {
+        return inbound.findByUploadId(uploadId);
+    }
 
     /**
      * Enqueues the request-ingestion job for a claimed upload when its entry is {@code RECEIVED} with

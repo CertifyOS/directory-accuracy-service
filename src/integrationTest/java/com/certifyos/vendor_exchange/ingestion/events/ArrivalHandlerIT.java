@@ -21,7 +21,6 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedOperations;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedUpload;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedUploadRepository;
-import com.certifyos.vendor_exchange.ingestion.jobs.IngestionJobEnqueuer;
 import com.certifyos.vendor_exchange.ingestion.jobs.RequestIngestionJob;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
 import com.certifyos.vendor_exchange.persistence.Collections;
@@ -87,7 +86,7 @@ class ArrivalHandlerIT {
     UnmatchedUploadRepository unmatched;
 
     @Inject
-    IngestionJobEnqueuer enqueuer;
+    IngestionRequests requests;
 
     @Inject
     Transactions transactions;
@@ -414,8 +413,7 @@ class ArrivalHandlerIT {
         VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
         Mockito.when(disabled.enabled()).thenReturn(false);
         Mockito.when(disabled.ingestion().completenessSignal()).thenReturn("DATA_FILE");
-        ArrivalHandler off =
-                new ArrivalHandler(batches, inbound, lifecycle, unmatchedOperations, enqueuer, disabled, clock);
+        ArrivalHandler off = new ArrivalHandler(batches, lifecycle, unmatchedOperations, requests, disabled, clock);
         String badName = "to/" + tenant + "/notes.txt";
 
         Assertions.assertEquals(ArrivalHandler.Outcome.DISABLED, off.handle(finalize(tenant, batch.id(), "8001")));

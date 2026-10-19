@@ -16,6 +16,7 @@ import com.certifyos.vendor_exchange.export.jobs.EgressFixtures;
 import com.certifyos.vendor_exchange.export.jobs.JobIds;
 import com.certifyos.vendor_exchange.http.Problem;
 import com.certifyos.vendor_exchange.ingestion.InboundFixtures;
+import com.certifyos.vendor_exchange.ingestion.events.ArrivalEvent;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
@@ -266,6 +267,49 @@ class VendorIngestionOpsResourceIT {
         Assertions.assertNull(unmatched.find(theirRow.id()).orElseThrow().resolution());
         Assertions.assertTrue(inbound.findByUploadId(row.id()).isEmpty());
         Assertions.assertTrue(inbound.findByUploadId(theirRow.id()).isEmpty());
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
+    void attachOfAnUploadOnAnotherBatchIs409() {
+        ExportBatch first = deliveredBatch(TENANT, "claimed");
+        ExportBatch second = deliveredBatch(TENANT, "claimedb");
+        UnmatchedUpload row = insert(parsedRow(TENANT, first.id()));
+        // a later delivery of the same event claimed the upload on its named batch; the row stayed open
+        String objectName =
+                row.id().substring(row.id().indexOf('|') + 1, row.id().lastIndexOf('|'));
+        ArrivalEvent event = new ArrivalEvent(
+                InboundFixtures.VENDOR_BUCKET,
+                objectName,
+                row.id().substring(row.id().lastIndexOf('|') + 1),
+                "OBJECT_FINALIZE",
+                row.receivedAt(),
+                null);
+        InboundFile onFirst = InboundFile.received(event, row.parsed(), now());
+        Assertions.assertEquals(row.id(), onFirst.uploadId());
+        collections
+                .batches()
+                .updateOne(Filters.eq("_id", first.id()), Updates.push("inboundFiles", onFirst.toDocument()));
+
+        member().pathParam("uploadId", row.id())
+                .body(Map.of("exportBatchId", second.id(), "reason", "vendor named the wrong batch"))
+                .post(ATTACH)
+                .then()
+                .statusCode(409)
+                .contentType(Problem.MEDIA_TYPE)
+                .body("code", Matchers.equalTo("ALREADY_CLAIMED"))
+                .body("detail", Matchers.containsString(first.id()));
+
+        Assertions.assertTrue(inbound.entriesFor(second.id()).isEmpty(), "nothing was claimed on the target batch");
+        Assertions.assertEquals(
+                first.id(),
+                inbound.findByUploadId(row.id()).orElseThrow().batch().id());
+        Assertions.assertNull(unmatched.find(row.id()).orElseThrow().resolution(), "the row stays open");
+        Assertions.assertTrue(
+                audit.trailForBatch(second.id(), 100).stream()
+                        .noneMatch(written -> written.type() == AuditEventType.INBOUND_UPLOAD_ATTACHED),
+                "no attach event");
     }
 
     @Test
