@@ -71,26 +71,27 @@ public final class SliceMerge {
 
     /**
      * Merges a practitioner slice: seed {@code {npi, firstName, lastName}} from the Golden record,
-     * overlay our slice's data, overlay the released values. The NPI is kept when our slice lacks it,
-     * because matching joins by {@code data.npi}.
+     * overlay our slice's data, overlay the released values. {@code data.npi} is the NPI the slice's
+     * crosswalk is built from, the Golden one or, when the Golden record has none, the one the vendor
+     * echoed: matching joins by {@code data.npi}, so it is never left null or different from the
+     * crosswalk.
      *
      * @param golden the practitioner's operational value
+     * @param npi the NPI the crosswalk uses
      * @param own our slice as read, or null when there is none yet
      * @param fieldValues released field to value ({@code first_name}, {@code last_name})
      * @return the slice data
      */
-    public static PractitionerSlice practitioner(OperationalValue golden, Slice own, Map<String, String> fieldValues) {
+    public static PractitionerSlice practitioner(
+            OperationalValue golden, String npi, Slice own, Map<String, String> fieldValues) {
         Map<String, Object> data = new LinkedHashMap<>();
-        String npi = text(golden.data(), NPI, NPI);
         data.put(NPI, npi);
         data.put(FIRST_NAME, text(golden.data(), FIRST_NAME, "first_name"));
         data.put(LAST_NAME, text(golden.data(), LAST_NAME, "last_name"));
         if (own != null) {
             data.putAll(own.data());
         }
-        if (data.get(NPI) == null) {
-            data.put(NPI, npi);
-        }
+        data.put(NPI, npi);
         fieldValues.forEach((field, value) -> {
             String key = PRACTITIONER_KEYS.get(field);
             if (key != null) {

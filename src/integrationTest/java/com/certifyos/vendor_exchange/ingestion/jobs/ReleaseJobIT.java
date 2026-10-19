@@ -10,7 +10,6 @@ import com.certifyos.vendor_exchange.auth.GoogleIdTokenService;
 import com.certifyos.vendor_exchange.auth.WireMockDal;
 import com.certifyos.vendor_exchange.ingestion.release.ReadBackService;
 import com.certifyos.vendor_exchange.ingestion.release.ReleaseFixtures;
-import com.certifyos.vendor_exchange.ingestion.release.ReleaseInProgressException;
 import com.certifyos.vendor_exchange.ingestion.release.ReleaseLifecycle;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldLevel;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation;
@@ -30,6 +29,7 @@ import jakarta.ws.rs.WebApplicationException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -134,6 +134,28 @@ class ReleaseJobIT {
         Job deadline = storage.getJobById(IngestionJobEnqueuer.readBackDeadlineId(releaseId));
         Assertions.assertEquals(StateName.SCHEDULED, deadline.getState());
         return ((ScheduledState) deadline.getJobState()).getScheduledAt();
+    }
+
+    /**
+     * Asserts that a waiting release scheduled its job again ({@link ReleaseJob#WAIT} after a moment
+     * between {@code before} and {@code after}) instead of failing, then deletes that job so it does not
+     * run after the test.
+     */
+    private void removeWaitJob(String releaseId, Instant before, Instant after) {
+        for (long second = before.plus(ReleaseJob.WAIT).getEpochSecond();
+                second <= after.plus(ReleaseJob.WAIT).getEpochSecond();
+                second++) {
+            UUID id = IngestionJobEnqueuer.releaseWaitId(releaseId, Instant.ofEpochSecond(second));
+            try {
+                Assertions.assertEquals(
+                        StateName.SCHEDULED, storage.getJobById(id).getState());
+                storage.deletePermanently(id);
+                return;
+            } catch (org.jobrunr.storage.JobNotFoundException notThisSecond) {
+                // the job is due one second later
+            }
+        }
+        Assertions.fail("release " + releaseId + " did not schedule its job again");
     }
 
     private AuditEvent failure(FieldRecommendation doc) {
@@ -454,10 +476,10 @@ class ReleaseJobIT {
                         ReleaseFixtures.requested("rel-other", "CoreLocation")),
                 requested(tenant, "cert-mine", "loc-shared", "phone", "3035550100", "rel-mine"));
 
-        ReleaseInProgressException backedOff =
-                Assertions.assertThrows(ReleaseInProgressException.class, () -> run(tenant, "cert-mine", "rel-mine"));
+        Instant before = Instant.now();
+        run(tenant, "cert-mine", "rel-mine");
 
-        Assertions.assertTrue(backedOff.getMessage().contains("rel-mine"));
+        removeWaitJob("rel-mine", before, Instant.now());
         Assertions.assertEquals(
                 ReviewStatus.RELEASE_REQUESTED, read(docs.get(1)).reviewStatus());
         WireMockDal.verify(0, batchFor(tenant));
@@ -544,17 +566,20 @@ class ReleaseJobIT {
                         WireMock.getRequestedFor(
                                 WireMock.urlEqualTo("/core/practitioner/candor:" + tenant + "/" + NPI))));
         Assertions.assertEquals(ReviewStatus.RELEASING, read(docs.get(0)).reviewStatus());
-        ReleaseInProgressException backedOff =
-                Assertions.assertThrows(ReleaseInProgressException.class, () -> run(tenant, "cert-conc", "rel-conc-2"));
+        Instant before = Instant.now();
+        run(tenant, "cert-conc", "rel-conc-2");
         first.get(10, TimeUnit.SECONDS);
 
-        Assertions.assertTrue(backedOff.getMessage().contains("rel-conc-2"));
+        removeWaitJob("rel-conc-2", before, Instant.now());
         Assertions.assertEquals(
                 ReviewStatus.RELEASE_REQUESTED, read(docs.get(1)).reviewStatus());
         WireMockDal.verify(1, batchFor(tenant));
-        Assertions.assertThrows(
-                ReleaseInProgressException.class,
-                () -> run(tenant, "cert-conc", "rel-conc-2"),
+        Instant again = Instant.now();
+        run(tenant, "cert-conc", "rel-conc-2");
+        removeWaitJob("rel-conc-2", again, Instant.now());
+        Assertions.assertEquals(
+                ReviewStatus.RELEASE_REQUESTED,
+                read(docs.get(1)).reviewStatus(),
                 "the first release is RELEASING until it is read back");
         readBack.markUnknown(tenant, List.of(read(docs.get(0))), ReleaseLifecycle.EVENT, Instant.now());
         run(tenant, "cert-conc", "rel-conc-2");

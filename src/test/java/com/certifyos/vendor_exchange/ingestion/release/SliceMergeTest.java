@@ -50,7 +50,7 @@ class SliceMergeTest {
                 Instant.parse("2026-09-20T10:00:00Z"));
 
         SliceMerge.PractitionerSlice merged =
-                SliceMerge.practitioner(goldenPractitioner(), own, Map.of("first_name", "Danielle"));
+                SliceMerge.practitioner(goldenPractitioner(), "1003002890", own, Map.of("first_name", "Danielle"));
 
         Assertions.assertEquals(
                 Map.of("npi", "1003002890", "firstName", "Danielle", "lastName", "Whitfield-Lee"),
@@ -61,7 +61,7 @@ class SliceMergeTest {
     @Test
     void practitionerWithoutOwnSliceIsSeededFromTheGoldenRecord() {
         SliceMerge.PractitionerSlice merged =
-                SliceMerge.practitioner(goldenPractitioner(), null, Map.of("last_name", "Smith"));
+                SliceMerge.practitioner(goldenPractitioner(), "1003002890", null, Map.of("last_name", "Smith"));
 
         Assertions.assertEquals(Map.of("npi", "1003002890", "firstName", "Dana", "lastName", "Smith"), merged.data());
     }
@@ -72,9 +72,21 @@ class SliceMergeTest {
                 "cert-1", "org-xyz", Map.of("npi", "1003002890", "first_name", "Dana", "last_name", "Lee"), null, null);
         Slice ownWithoutNpi = new Slice("s", SOURCE, "1003002890", Map.of("lastName", "Lee-Ray"), null);
 
-        SliceMerge.PractitionerSlice merged = SliceMerge.practitioner(snake, ownWithoutNpi, Map.of());
+        SliceMerge.PractitionerSlice merged = SliceMerge.practitioner(snake, "1003002890", ownWithoutNpi, Map.of());
 
         Assertions.assertEquals(Map.of("npi", "1003002890", "firstName", "Dana", "lastName", "Lee-Ray"), merged.data());
+    }
+
+    @Test
+    void practitionerWithoutAGoldenNpiCarriesTheCrosswalkNpi() {
+        OperationalValue noNpi =
+                new OperationalValue("cert-1", "org-xyz", Map.of("firstName", "Dana", "lastName", "Lee"), null, null);
+
+        SliceMerge.PractitionerSlice merged =
+                SliceMerge.practitioner(noNpi, "1003002890", null, Map.of("first_name", "Danielle"));
+
+        Assertions.assertEquals(
+                "1003002890", merged.data().get("npi"), "matching joins by data.npi, the crosswalk's NPI");
     }
 
     @Test

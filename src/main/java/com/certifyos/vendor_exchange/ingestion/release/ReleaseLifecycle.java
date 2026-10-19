@@ -248,7 +248,7 @@ public class ReleaseLifecycle {
      * claim's transaction could not see another job's uncommitted claim and both would go on. Each job
      * counts after its own claim committed, so of two concurrent jobs at least one sees the other; a
      * non-zero count puts this release's fields back to {@code RELEASE_REQUESTED} and throws, so
-     * JobRunr retries the job later. The count also takes the fields of other releases, of any
+     * the release job schedules itself again (not a JobRunr retry). The count also takes the fields of other releases, of any
      * practitioner, that are {@code RELEASING} and not yet written at one of this release's locations:
      * every practitioner at a location writes the same candor location slice, read, merged and written
      * whole, so two of them at once would drop each other's values. A release an earlier run already wrote skips the count: its DAL

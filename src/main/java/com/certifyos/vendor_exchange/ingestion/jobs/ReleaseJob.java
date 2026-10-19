@@ -12,6 +12,7 @@ import com.certifyos.vendor_exchange.export.jobs.JobLogContext;
 import com.certifyos.vendor_exchange.ingestion.release.Crosswalks;
 import com.certifyos.vendor_exchange.ingestion.release.NameSound;
 import com.certifyos.vendor_exchange.ingestion.release.RankingGuard;
+import com.certifyos.vendor_exchange.ingestion.release.ReleaseInProgressException;
 import com.certifyos.vendor_exchange.ingestion.release.ReleaseLifecycle;
 import com.certifyos.vendor_exchange.ingestion.release.SliceMerge;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldLevel;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -64,6 +66,9 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
     static final String LOCATION_ENTITY_ADDRESS = "LocationEntityAddress";
     static final String UPSERT = "UPSERT";
     static final int BODY_MAX = 400;
+
+    /** How long a release waits for another release on its practitioner or location before trying again. */
+    static final Duration WAIT = Duration.ofMinutes(1);
 
     /** The DAL answers that refuse the batch itself; every other 4xx is operational and retried. */
     static final Set<Integer> REFUSALS = Set.of(400, 422);
@@ -134,7 +139,16 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
                 // Not a silent no-op: the release would be stranded RELEASE_REQUESTED. JobRunr retries it.
                 throw new IllegalStateException("service disabled; release " + request + " deferred to a retry");
             }
-            release(request, InboundJobSupport.jobAttempts(job));
+            try {
+                release(request, InboundJobSupport.jobAttempts(job));
+            } catch (ReleaseInProgressException waiting) {
+                // Waiting for another release is not a failure: the claim put this release's fields back
+                // to RELEASE_REQUESTED, and a new job runs it later with JobRunr's retries untouched, so a
+                // long read-back never exhausts them into RELEASE_FAILED.
+                Instant at = clock.instant().plus(WAIT);
+                UUID again = enqueuer.releaseAgain(request, at);
+                LOG.infof("%s; scheduled again at %s as job %s", waiting.getMessage(), at, again);
+            }
         }
     }
 
@@ -215,7 +229,8 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
             }
             String crosswalk = Crosswalks.practitioner(npi);
             Supplier<Slice> read = () -> slices.practitioner(tenantId, sourceType, crosswalk);
-            SliceMerge.PractitionerSlice merged = SliceMerge.practitioner(golden, own(read), valuesOf(atPractitioner));
+            SliceMerge.PractitionerSlice merged =
+                    SliceMerge.practitioner(golden, npi, own(read), valuesOf(atPractitioner));
             operations.add(upsert(CORE_PRACTITIONER, "practitioner", sourceType, crosswalk, merged.data()));
             pending.add(new Pending("practitioner", CORE_PRACTITIONER, crosswalk, ids(atPractitioner), read));
         }

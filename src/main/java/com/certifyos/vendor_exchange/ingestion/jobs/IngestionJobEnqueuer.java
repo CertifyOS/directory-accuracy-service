@@ -113,6 +113,25 @@ public class IngestionJobEnqueuer {
     }
 
     /**
+     * The id of a release job scheduled again because the release had to wait: one per second it is
+     * due at, so each wait is a new job with JobRunr's retries untouched.
+     *
+     * @param releaseId the release
+     * @param at when the job is due
+     * @return a stable UUID for that release and second
+     */
+    public static UUID releaseWaitId(String releaseId, Instant at) {
+        return JobIds.of(ReleaseJob.NAME, releaseId + ":wait:" + at.getEpochSecond(), 1);
+    }
+
+    /** Schedules a release's job again at {@code at}, after a wait, and returns its id. */
+    public UUID releaseAgain(ReleaseJobRequest request, Instant at) {
+        UUID id = releaseWaitId(request.releaseId(), at);
+        scheduler.schedule(id, at, request);
+        return id;
+    }
+
+    /**
      * The id of a release's read-back deadline: the one the release job records on the fields as
      * {@code deadlineJobId} and the event handler deletes once the release is read back (plan P13).
      *
