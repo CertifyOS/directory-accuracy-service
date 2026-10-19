@@ -37,16 +37,26 @@ public class InboundJobSupport {
      * Loads the entry a job should work on and puts the tenant on the log context.
      *
      * @param job the job name, for the log line
-     * @param uploadId the upload
-     * @param attempt the entry attempt the request was made for
+     * @param request the job's request: the batch, the upload and the entry attempt it was made for
      * @param expected the states the job works from
-     * @return the entry with its batch, or empty when it is missing, of another attempt or in another
-     *     state (each logged once)
+     * @return the entry with its batch, or empty when it is missing, on another batch, of another
+     *     attempt or in another state (each logged once)
      */
-    public Optional<Located> loadExpecting(String job, String uploadId, int attempt, Set<InboundFileState> expected) {
+    public Optional<Located> loadExpecting(String job, InboundJobRequest request, Set<InboundFileState> expected) {
+        String uploadId = request.uploadId();
+        int attempt = request.attempt();
         Optional<Located> located = inbound.findByUploadId(uploadId);
         if (located.isEmpty()) {
             LOG.warnf("%s %s: inbound entry not found, exiting as a no-op", job, uploadId);
+            return Optional.empty();
+        }
+        if (!located.get().batch().id().equals(request.exportBatchId())) {
+            LOG.warnf(
+                    "%s %s upload %s: the entry is on batch %s, exiting as a no-op",
+                    job,
+                    request.exportBatchId(),
+                    uploadId,
+                    located.get().batch().id());
             return Optional.empty();
         }
         IngestionLogContext.tenant(located.get().batch().tenantId());

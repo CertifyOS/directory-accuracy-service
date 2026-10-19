@@ -78,7 +78,7 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
                 throw new IllegalStateException(
                         "service disabled; ingestion deadline check " + request + " deferred to a retry");
             }
-            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), request.attempt(), EXPECTED);
+            Optional<Located> loaded = support.loadExpecting(NAME, request, EXPECTED);
             if (loaded.isEmpty()) {
                 return;
             }

@@ -52,9 +52,7 @@ class ArrivalEventTest {
     @Test
     void unreadableIdentityIsEmpty() {
         for (String[] bad : new String[][] {
-            {"objectId", "to/org xyz/file.csv"},
-            {"objectId", "to/org|xyz/file.csv"},
-            {"objectId", "to/org\txyz/file.csv"},
+            {"objectId", " "},
             {"bucketId", "vendor sftp"},
             {"bucketId", "vendor|sftp"},
             {"objectGeneration", "abc"},
@@ -65,6 +63,20 @@ class ArrivalEventTest {
             Map<String, String> attributes = attributes();
             attributes.put(bad[0], bad[1]);
             Assertions.assertTrue(ArrivalEvent.fromAttributes(attributes).isEmpty(), bad[0] + "=" + bad[1]);
+        }
+    }
+
+    @Test
+    void anObjectNameWithWhitespaceOrAPipeIsReadAndItsUploadIdEscaped() {
+        for (String name :
+                new String[] {"to/org-xyz/Copy of results.csv", "to/org|xyz/file.csv", "to/org\txyz/f.csv"}) {
+            Map<String, String> attributes = attributes();
+            attributes.put("objectId", name);
+            ArrivalEvent event = ArrivalEvent.fromAttributes(attributes).orElseThrow();
+
+            Assertions.assertEquals(name, event.objectId());
+            Assertions.assertEquals(3, event.uploadId().split("\\|", -1).length, event.uploadId());
+            Assertions.assertTrue(event.uploadId().codePoints().noneMatch(Character::isWhitespace), event.uploadId());
         }
     }
 
