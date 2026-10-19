@@ -170,6 +170,12 @@ public class MongoIndexes {
                 .createIndex(
                         Indexes.ascending("resolution.kind", "receivedAt"),
                         new IndexOptions().name("unmatched_resolution"));
+        // The operator list: one folder tenant's open rows (resolution.kind null) oldest first.
+        collections
+                .unmatchedUploads()
+                .createIndex(
+                        Indexes.ascending("folderTenant", "resolution.kind", "receivedAt", "_id"),
+                        new IndexOptions().name("unmatched_open_by_tenant"));
 
         // vendor_review_events
         collections

@@ -168,10 +168,15 @@ public class MongoIndexesIT {
                 "rejected_values_practitioner",
                 new Document("tenantId", 1).append("certifyPractitionerId", 1));
 
+        Map<String, Document> unmatched = byName(collections.unmatchedUploads());
+        assertKey(unmatched, "unmatched_resolution", new Document("resolution.kind", 1).append("receivedAt", 1));
         assertKey(
-                byName(collections.unmatchedUploads()),
-                "unmatched_resolution",
-                new Document("resolution.kind", 1).append("receivedAt", 1));
+                unmatched,
+                "unmatched_open_by_tenant",
+                new Document("folderTenant", 1)
+                        .append("resolution.kind", 1)
+                        .append("receivedAt", 1)
+                        .append("_id", 1));
 
         Map<String, Document> reviewEvents = byName(collections.reviewEvents());
         assertKey(reviewEvents, "review_events_by_field", new Document("fieldRecommendationId", 1).append("_id", 1));
