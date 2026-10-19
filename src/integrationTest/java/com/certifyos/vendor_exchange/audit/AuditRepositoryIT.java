@@ -8,7 +8,9 @@ import com.certifyos.vendor_exchange.export.batch.ExportBatchRepository;
 import com.certifyos.vendor_exchange.export.schedule.SelectionCriteria;
 import com.certifyos.vendor_exchange.export.schedule.SelectionCriteria.Clause;
 import com.certifyos.vendor_exchange.export.schedule.SelectionCriteria.Operator;
+import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Transactions;
+import com.mongodb.client.model.Filters;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -16,6 +18,7 @@ import jakarta.inject.Inject;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
+import org.bson.Document;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -37,6 +40,9 @@ public class AuditRepositoryIT {
 
     @Inject
     Transactions transactions;
+
+    @Inject
+    Collections collections;
 
     private ExportBatch insertBatch(String tenantId) {
         ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", YearMonth.of(2026, 10), 1, CRITERIA, NOW);
@@ -154,6 +160,50 @@ public class AuditRepositoryIT {
                 .detail("totalRecords", null)
                 .detail("totalRows", null)
                 .build();
+    }
+
+    @Test
+    void fieldEventsLandInReviewEvents() {
+        String batchId = "aud-field-candor-2026-10-001";
+        String fieldId = "aud-field|candor|" + batchId + "|cert-000123|loc-7781|phone";
+        AuditEvent approved = fieldEvent(AuditEventType.FIELD_APPROVED, fieldId, NOW)
+                .detail("field", "phone")
+                .detail("fromStatus", "PENDING")
+                .detail("version", 1L)
+                .build();
+        transactions.run(session -> {
+            audit.write(session, approved);
+            return null;
+        });
+        AuditEvent requested = fieldEvent(AuditEventType.FIELD_RELEASE_REQUESTED, fieldId, NOW.plusSeconds(5))
+                .release("aud-field-rel-1")
+                .detail("releaseId", "aud-field-rel-1")
+                .detail("bulk", false)
+                .build();
+        audit.write(requested);
+
+        Assertions.assertEquals(0, collections.events().countDocuments(Filters.eq("fieldRecommendationId", fieldId)));
+        Assertions.assertEquals(0, collections.events().countDocuments(Filters.eq("tenantId", "aud-field")));
+        Document stored =
+                collections.reviewEvents().find(Filters.eq("id", approved.id())).first();
+        Assertions.assertNotNull(stored, "the field event is in vendor_review_events");
+        Assertions.assertEquals(fieldId, stored.getString("fieldRecommendationId"));
+        Assertions.assertEquals("cert-000123", stored.getString("certifyPractitionerId"));
+
+        List<AuditEvent> trail = audit.trailForField(fieldId, 10);
+        Assertions.assertEquals(List.of(approved, requested), trail);
+        Assertions.assertEquals(List.of(requested), audit.findForRelease("aud-field", "aud-field-rel-1", 10));
+        Assertions.assertEquals(List.of(), audit.findForRelease("other-tenant", "aud-field-rel-1", 10));
+        Assertions.assertEquals(List.of(), audit.findForBatch(batchId, 10), "batch trail reads export events only");
+    }
+
+    private static AuditEvent.Builder fieldEvent(AuditEventType type, String fieldId, Instant when) {
+        return AuditEvent.of(type, "aud-field", "candor")
+                .actor("user:reviewer-7")
+                .batch("aud-field-candor-2026-10-001")
+                .upload("vendor-sftp|to/aud-field/f.csv|1760520000123456")
+                .field(fieldId, "cert-000123")
+                .occurredAt(when);
     }
 
     @Test

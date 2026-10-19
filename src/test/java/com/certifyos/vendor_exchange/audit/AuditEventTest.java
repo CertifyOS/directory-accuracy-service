@@ -11,13 +11,74 @@ class AuditEventTest {
 
     static final Instant WHEN = Instant.parse("2026-10-01T07:12:09Z");
 
+    static final String FIELD_ID = "org-xyz|candor|org-xyz-candor-2026-10-001|cert-000123|loc-7781|phone";
+
     @Test
-    void catalogueHasTheDesignsTwentyFourTypes() {
-        Assertions.assertEquals(24, AuditEventType.values().length);
+    void catalogueHasTheDesignsFortyThreeTypes() {
+        Assertions.assertEquals(43, AuditEventType.values().length, "24 export types and 19 ingestion types");
         Assertions.assertEquals(AuditEventType.Scope.SCHEDULE, AuditEventType.SCHEDULE_CREATED.scope());
         Assertions.assertEquals(AuditEventType.Scope.BATCH, AuditEventType.EXPORT_BATCH_DELIVERED.scope());
         Assertions.assertEquals(AuditEventType.Scope.SERVICE, AuditEventType.EXPORT_TICK_COMPLETED.scope());
         Assertions.assertEquals(AuditEventType.Scope.SERVICE, AuditEventType.EXPORT_EVENT_REJECTED.scope());
+        Assertions.assertEquals(AuditEventType.Scope.BATCH, AuditEventType.INBOUND_FILE_STAGED.scope());
+        Assertions.assertEquals(AuditEventType.Scope.SERVICE, AuditEventType.INBOUND_FILE_UNMATCHED.scope());
+        Assertions.assertEquals(AuditEventType.Scope.FIELD, AuditEventType.FIELD_APPROVED.scope());
+        Assertions.assertEquals(AuditEventType.Scope.FIELD, AuditEventType.FIELD_RELEASE_FAILED.scope());
+    }
+
+    @Test
+    void fieldEventNeedsAFieldId() {
+        IllegalArgumentException refused = Assertions.assertThrows(
+                IllegalArgumentException.class, () -> AuditEvent.of(AuditEventType.FIELD_APPROVED, "org-xyz", "candor")
+                        .actor("user:reviewer-7")
+                        .detail("field", "phone")
+                        .detail("fromStatus", "PENDING")
+                        .detail("version", 1L)
+                        .build());
+        Assertions.assertTrue(refused.getMessage().contains("fieldRecommendationId"), refused.getMessage());
+        AuditEvent approved = AuditEvent.of(AuditEventType.FIELD_APPROVED, "org-xyz", "candor")
+                .actor("user:reviewer-7")
+                .field(FIELD_ID, "cert-000123")
+                .detail("field", "phone")
+                .detail("fromStatus", "PENDING")
+                .detail("version", 1L)
+                .build();
+        Assertions.assertEquals(FIELD_ID, approved.fieldRecommendationId());
+    }
+
+    @Test
+    void envelopeFieldsRoundTrip() {
+        AuditEvent event = AuditEvent.of(AuditEventType.FIELD_RELEASE_REQUESTED, "org-xyz", "candor")
+                .actor("user:reviewer-7")
+                .batch("org-xyz-candor-2026-10-001")
+                .upload("vendor-sftp|to/org-xyz/f.csv|1760520000123456")
+                .field(FIELD_ID, "cert-000123")
+                .release("rel-1")
+                .occurredAt(WHEN)
+                .detail("releaseId", "rel-1")
+                .detail("bulk", true)
+                .build();
+        Assertions.assertNull(event.attempt(), "batch(id) leaves the attempt unset");
+
+        Document doc = event.toDocument();
+        Assertions.assertEquals("vendor-sftp|to/org-xyz/f.csv|1760520000123456", doc.getString("uploadId"));
+        Assertions.assertEquals(FIELD_ID, doc.getString("fieldRecommendationId"));
+        Assertions.assertEquals("cert-000123", doc.getString("certifyPractitionerId"));
+        Assertions.assertEquals("rel-1", doc.getString("releaseId"));
+        Assertions.assertFalse(doc.containsKey("attempt"));
+        Assertions.assertEquals(event, AuditEvent.fromDocument(doc));
+
+        AuditEvent fileEvent = AuditEvent.forBatch(
+                        AuditEventType.INBOUND_UPLOAD_DISCARDED, "org-xyz", "candor", "org-xyz-candor-2026-10-001", 1)
+                .upload("vendor-sftp|to/org-xyz/f.csv|1760520000123456")
+                .detail("reason", "not ours")
+                .detail("uploadId", "vendor-sftp|to/org-xyz/f.csv|1760520000123456")
+                .build();
+        Document fileDoc = fileEvent.toDocument();
+        Assertions.assertFalse(fileDoc.containsKey("fieldRecommendationId"), "written only when set");
+        Assertions.assertFalse(fileDoc.containsKey("certifyPractitionerId"));
+        Assertions.assertFalse(fileDoc.containsKey("releaseId"));
+        Assertions.assertEquals(fileEvent, AuditEvent.fromDocument(fileDoc));
     }
 
     @Test

@@ -99,4 +99,23 @@ class PermissionFilterTest {
         Assertions.assertTrue(
                 new PermissionFilter(cfg, ctx).filter(rc, resource("open")).isEmpty());
     }
+
+    @Test
+    void reviewPermissionsResolve() {
+        Assertions.assertEquals("vendor-review", Permission.REVIEW_READ.resource());
+        Assertions.assertEquals("read", Permission.REVIEW_READ.action());
+        Assertions.assertEquals("vendor-review", Permission.REVIEW_DECIDE.resource());
+        Assertions.assertEquals("decide", Permission.REVIEW_DECIDE.action());
+        Assertions.assertEquals("vendor-review", Permission.REVIEW_RELEASE.resource());
+        Assertions.assertEquals("release", Permission.REVIEW_RELEASE.action());
+
+        Map<String, Map<String, List<String>>> reviewer = Map.of("org-a", Map.of("vendor-review", List.of("read")));
+        Assertions.assertTrue(PermissionFilter.allows(reviewer, "org-a", Permission.REVIEW_READ));
+        Assertions.assertFalse(PermissionFilter.allows(reviewer, "org-a", Permission.REVIEW_DECIDE));
+        Assertions.assertFalse(PermissionFilter.allows(reviewer, "org-a", Permission.READ), "export read is separate");
+        Assertions.assertFalse(PermissionFilter.allows(reviewer, "org-b", Permission.REVIEW_READ));
+        Assertions.assertFalse(
+                PermissionFilter.allows(readOnlyIn("org-a"), "org-a", Permission.REVIEW_READ),
+                "vendor-export read grants no review");
+    }
 }
