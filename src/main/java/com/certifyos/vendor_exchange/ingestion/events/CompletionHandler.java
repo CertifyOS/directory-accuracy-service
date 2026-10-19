@@ -9,6 +9,7 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Loc
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
 import com.certifyos.vendor_exchange.ingestion.jobs.IngestionJobEnqueuer;
+import com.certifyos.vendor_exchange.ingestion.jobs.StageRowsJob;
 import com.certifyos.vendor_exchange.ingestion.staging.StagingLifecycle;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -217,10 +218,28 @@ public class CompletionHandler {
         enqueuer.delete(deadline);
     }
 
-    private static boolean stageJobRecorded(Located located) {
-        UUID stage = IngestionJobEnqueuer.stageRowsId(
-                located.entry().uploadId(), located.entry().attempt());
-        return stage.toString().equals(located.entry().jobId());
+    /**
+     * Whether a stage job already owns the entry: the first deterministic one, the reconciler's latest
+     * re-enqueue, or any stage job JobRunr still holds under the recorded id. Only an entry that still
+     * names the job that owned {@code INGESTION_REQUESTED} is handed over again, so a reconciled stage
+     * job never gets a second one beside it.
+     */
+    private boolean stageJobRecorded(Located located) {
+        InboundFile entry = located.entry();
+        String recorded = entry.jobId();
+        if (recorded == null) {
+            return false;
+        }
+        String first = IngestionJobEnqueuer.stageRowsId(entry.uploadId(), entry.attempt())
+                .toString();
+        String reconciled = entry.reconciliations() == 0
+                ? null
+                : IngestionJobEnqueuer.reconciledId(
+                                StageRowsJob.NAME, entry.uploadId(), entry.reconciliations(), entry.attempt())
+                        .toString();
+        return recorded.equals(first)
+                || recorded.equals(reconciled)
+                || enqueuer.isPending(recorded, StageRowsJob.class);
     }
 
     /** {@link #deleteDeadlineCheck} after the stage hand-over, where a failure must not undo the 204. */
