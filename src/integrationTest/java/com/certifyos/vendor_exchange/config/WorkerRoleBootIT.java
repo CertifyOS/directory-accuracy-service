@@ -2,6 +2,8 @@ package com.certifyos.vendor_exchange.config;
 
 import com.certifyos.vendor_exchange.MongoResource;
 import com.certifyos.vendor_exchange.WorkerTestProfile;
+import com.certifyos.vendor_exchange.export.jobs.ReconcilerJob;
+import com.certifyos.vendor_exchange.ingestion.jobs.InboundReconcilerJob;
 import com.mongodb.client.MongoClient;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -11,6 +13,7 @@ import java.time.Duration;
 import java.util.List;
 import org.awaitility.Awaitility;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.jobrunr.jobs.RecurringJob;
 import org.jobrunr.storage.StorageProvider;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -56,5 +59,26 @@ public class WorkerRoleBootIT {
         Assertions.assertTrue(
                 names.stream().filter(n -> !n.startsWith("jobrunr_")).noneMatch(n -> n.contains("job")),
                 "no unprefixed JobRunr collection expected: " + names);
+    }
+
+    @Test
+    void bothReconcilersAreRegisteredWithTheirCrons() {
+        List<RecurringJob> recurring = storage.getRecurringJobs();
+        RecurringJob inboundReconciler = recurring.stream()
+                .filter(job -> job.getId().equals(InboundReconcilerJob.RECURRING_ID))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no " + InboundReconcilerJob.RECURRING_ID + " in " + recurring));
+        RecurringJob exportReconciler = recurring.stream()
+                .filter(job -> job.getId().equals(ReconcilerJob.RECURRING_ID))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no " + ReconcilerJob.RECURRING_ID + " in " + recurring));
+        Assertions.assertEquals(InboundReconcilerJob.CRON, inboundReconciler.getScheduleExpression());
+        Assertions.assertEquals(ReconcilerJob.CRON, exportReconciler.getScheduleExpression());
+        Assertions.assertEquals(
+                1,
+                recurring.stream()
+                        .filter(job -> job.getId().equals(InboundReconcilerJob.RECURRING_ID))
+                        .count(),
+                "registered once");
     }
 }

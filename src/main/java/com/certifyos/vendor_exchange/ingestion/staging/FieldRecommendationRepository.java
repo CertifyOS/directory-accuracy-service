@@ -18,6 +18,7 @@ import com.mongodb.client.model.WriteModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -140,6 +141,28 @@ public class FieldRecommendationRepository {
                         .find(Filters.and(Filters.eq("_id", id), Filters.eq("tenantId", tenantId)))
                         .first())
                 .map(FieldRecommendation::fromDocument);
+    }
+
+    /**
+     * Where existing documents came from, for staging to tell its own earlier writes from another
+     * upload's. Reads {@code _id} and {@code sourceFile} only, at most {@code ids.size()} documents.
+     *
+     * @param tenantId the tenant
+     * @param ids recommendation ids
+     * @return id to source file, for the ids that exist
+     */
+    public Map<String, FieldRecommendation.SourceFile> sourceFilesOf(String tenantId, Collection<String> ids) {
+        Map<String, FieldRecommendation.SourceFile> sources = new HashMap<>();
+        if (!ids.isEmpty()) {
+            recommendations()
+                    .find(Filters.and(Filters.in("_id", ids), Filters.eq("tenantId", tenantId)))
+                    .projection(Projections.include("sourceFile"))
+                    .limit(ids.size())
+                    .forEach(doc -> Documents.nested(doc, "sourceFile")
+                            .ifPresent(source -> sources.put(
+                                    doc.getString("_id"), FieldRecommendation.SourceFile.fromDocument(source))));
+        }
+        return sources;
     }
 
     /**
