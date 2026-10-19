@@ -49,6 +49,24 @@ public class IngestionJobEnqueuer {
     }
 
     /**
+     * The id of a release's job: unique per release, so a second release of the practitioner gets
+     * its own job (plan P12) and a repeated enqueue of one release is a no-op.
+     *
+     * @param releaseId the release
+     * @return a stable UUID
+     */
+    public static UUID releaseJobId(String releaseId) {
+        return JobIds.of(ReleaseJob.NAME, releaseId, 1);
+    }
+
+    /** Enqueues the release job for one release of one practitioner and returns its id. */
+    public UUID release(String tenantId, String certifyPractitionerId, String releaseId) {
+        UUID id = releaseJobId(releaseId);
+        scheduler.enqueue(id, new ReleaseJobRequest(tenantId, certifyPractitionerId, releaseId));
+        return id;
+    }
+
+    /**
      * Deletes a pending job (a deadline check the completion event made unnecessary). An id JobRunr
      * has never seen is ignored; both not-found exceptions are caught, as in the export lane.
      */

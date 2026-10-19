@@ -140,7 +140,7 @@ public record FieldRecommendation(
 
     /**
      * What a release did to the golden record. Every component is optional; the release request
-     * writes the first four, the release job the rest.
+     * writes the first five, the release job the rest.
      *
      * @param releaseId groups the fields of one release
      * @param requestedBy who requested it
@@ -148,6 +148,8 @@ public record FieldRecommendation(
      * @param writePath {@code SLICE} or {@code IN_PLACE}
      * @param resource the DAL resource written
      * @param crosswalkId the crosswalk the write went through
+     * @param sliceId the certify id of the slice the write produced, as the DAL answered or read after the
+     *     write; the read-back looks for it in the operational value's {@code contributingSlices}
      * @param writtenAt when the DAL accepted the write
      * @param deadlineJobId the read-back deadline job
      * @param outcome {@code WON}, {@code OUTRANKED}, {@code NOT_APPLIED} or {@code UNKNOWN}
@@ -162,6 +164,7 @@ public record FieldRecommendation(
             String writePath,
             String resource,
             String crosswalkId,
+            String sliceId,
             Instant writtenAt,
             String deadlineJobId,
             String outcome,
@@ -177,6 +180,7 @@ public record FieldRecommendation(
             Documents.put(doc, "writePath", writePath);
             Documents.put(doc, "resource", resource);
             Documents.put(doc, "crosswalkId", crosswalkId);
+            Documents.put(doc, "sliceId", sliceId);
             Documents.put(doc, "writtenAt", writtenAt);
             Documents.put(doc, "deadlineJobId", deadlineJobId);
             Documents.put(doc, "outcome", outcome);
@@ -194,6 +198,7 @@ public record FieldRecommendation(
                     doc.getString("writePath"),
                     doc.getString("resource"),
                     doc.getString("crosswalkId"),
+                    doc.getString("sliceId"),
                     Documents.instant(doc, "writtenAt"),
                     doc.getString("deadlineJobId"),
                     doc.getString("outcome"),

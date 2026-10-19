@@ -365,6 +365,7 @@ public class FieldRecommendationRepositoryIT {
                             null,
                             null,
                             null,
+                            null,
                             null)
                     .toDocument();
             boolean requested = transactions.run(session -> repository.decide(
