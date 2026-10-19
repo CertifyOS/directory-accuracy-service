@@ -371,6 +371,29 @@ class CompletionHandlerIT {
     }
 
     @Test
+    void redeliveryOfAParsedEntryWithoutItsStageJobHandsOverAgain() {
+        String tenant = "compl-handover";
+        Seeded seeded = requested(tenant);
+        // the first delivery committed PARSED, then died before the stage job was enqueued
+        collections
+                .batches()
+                .updateOne(
+                        Filters.eq("_id", seeded.batch().id()),
+                        Updates.set("inboundFiles.0.state", InboundFileState.PARSED.name()));
+        int before = trail(seeded).size();
+
+        Assertions.assertEquals(
+                CompletionHandler.Outcome.STATE_PASSED,
+                handler.handle(message("m-h1", parsedBody(tenant, externalRef(seeded), seeded, "COMPLETED"))));
+
+        Assertions.assertEquals(
+                StateName.ENQUEUED, storage.getJobById(stageJobId(seeded)).getState());
+        Assertions.assertEquals(stageJobId(seeded).toString(), entry(seeded).jobId());
+        Assertions.assertEquals(InboundFileState.PARSED, entry(seeded).state());
+        Assertions.assertTrue(since(seeded, before).isEmpty(), "no second INBOUND_FILE_PARSED");
+    }
+
+    @Test
     void archivingEntryIsRetried() {
         String tenant = "compl-archiving";
         Seeded seeded = InboundFixtures.deliveredBatchWithEntry(

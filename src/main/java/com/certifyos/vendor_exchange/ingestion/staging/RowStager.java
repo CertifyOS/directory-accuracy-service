@@ -65,7 +65,8 @@ public class RowStager {
      * @param recommendations documents this chunk wrote
      * @param confirmedFields cells the vendor marked {@code VALID}
      * @param unverifiedFields cells the vendor could not verify
-     * @param disagreements practitioner-level cells that disagreed with the kept value
+     * @param disagreements practitioner-level cells that disagreed with the kept value within this
+     *     chunk (rows of one practitioner in an earlier chunk are not compared)
      */
     public record Progress(
             String after,
@@ -85,12 +86,14 @@ public class RowStager {
      * Stages one chunk and checkpoints it.
      *
      * @param located the entry, in {@code STAGING}
+     * @param from the checkpoint the stream resumed from for this chunk, null for the first chunk
      * @param chunk the chunk's rows, in stream order, at least one
      * @param now the staging time of the chunk's documents and of the checkpoint
-     * @return what the chunk added, or empty when the entry had left {@code STAGING} and the
-     *     checkpoint was not written (the documents are, harmlessly: they are idempotent)
+     * @return what the chunk added, or empty when the entry had left {@code STAGING} or another run
+     *     had moved its checkpoint, and this checkpoint was not written (the documents are,
+     *     harmlessly: they are idempotent)
      */
-    public Optional<Progress> stageChunk(Located located, List<FileIngestionRow> chunk, Instant now) {
+    public Optional<Progress> stageChunk(Located located, String from, List<FileIngestionRow> chunk, Instant now) {
         Instant started = clock.instant();
         String tenantId = located.batch().tenantId();
         String uploadId = located.entry().uploadId();
@@ -126,10 +129,10 @@ public class RowStager {
                 built.confirmedFields(),
                 built.unverifiedFields(),
                 built.practitionerFieldDisagreements());
-        if (!lifecycle.chunkCheckpoint(located, progress, now)) {
+        if (!lifecycle.chunkCheckpoint(located, from, progress, now)) {
             LOG.infof(
-                    "%s upload %s left STAGING; chunk to %s not checkpointed",
-                    located.batch().id(), uploadId, built.lastCursor());
+                    "%s upload %s left STAGING or its checkpoint moved past %s; chunk to %s not checkpointed",
+                    located.batch().id(), uploadId, from, built.lastCursor());
             return Optional.empty();
         }
         progress.dispositions().forEach((disposition, count) -> {

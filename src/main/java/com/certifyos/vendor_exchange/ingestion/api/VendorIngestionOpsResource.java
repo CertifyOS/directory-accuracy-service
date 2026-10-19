@@ -60,7 +60,9 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 @APIResponse(
         responseCode = "409",
-        description = "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED, ALREADY_CLAIMED)",
+        description =
+                "Not in a state that allows the write (ALREADY_RESOLVED, ATTACH_NOT_ALLOWED, ALREADY_CLAIMED), or the "
+                        + "file names another tenant (TENANT_MISMATCH)",
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 @APIResponse(
         responseCode = "503",

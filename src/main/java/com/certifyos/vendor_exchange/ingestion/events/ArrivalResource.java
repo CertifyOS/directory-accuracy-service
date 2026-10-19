@@ -17,7 +17,8 @@ import org.jboss.logging.Logger;
 
 /**
  * Where Pub/Sub pushes the vendor bucket's storage notifications. The identity token is verified by
- * the bound filter before this code runs. Every handler outcome answers 204; an envelope with no
+ * the bound filter before this code runs. Every handler outcome answers 204 (a switched-off service
+ * answers 503 through the handler's exception); an envelope with no
  * message is acknowledged too, since it will not improve on redelivery. A storage notification may
  * carry no {@code data} at all (payload format NONE), so only the message is required. An exception
  * from the handler reaches the 500 mapper and Pub/Sub redelivers.
@@ -47,8 +48,13 @@ public class ArrivalResource {
             summary = "Receive a vendor bucket storage notification",
             description = "Pub/Sub push endpoint for object notifications under the vendor bucket. Requires the "
                     + "subscription's OIDC identity token; reads the message attributes only and answers 204 "
-                    + "to acknowledge every outcome, including an event it ignores or cannot match.")
+                    + "to acknowledge every outcome, including an event it ignores or cannot match; answers 503 while "
+                    + "the service is switched off so the message is redelivered.")
     @APIResponse(responseCode = "204", description = "Acknowledged")
+    @APIResponse(
+            responseCode = "503",
+            description = "The service is switched off (SERVICE_DISABLED); Pub/Sub redelivers the message",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     @APIResponse(
             responseCode = "401",
             description =

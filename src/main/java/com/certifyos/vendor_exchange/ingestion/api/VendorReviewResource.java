@@ -36,6 +36,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -69,16 +70,6 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
         responseCode = "403",
         description = "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED) or lacks the "
                 + "permission (PERMISSION_DENIED)",
-        content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
-@APIResponse(
-        responseCode = "404",
-        description = "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND, PRACTITIONER_NOT_FOUND, "
-                + "BATCH_NOT_FOUND)",
-        content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
-@APIResponse(
-        responseCode = "409",
-        description = "The document's state does not allow the decision or its version moved (DECISION_CONFLICT); "
-                + "the detail is JSON of id, reviewStatus, version and lastDecisionBy",
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 @APIResponse(
         responseCode = "503",
@@ -190,6 +181,10 @@ public class VendorReviewResource {
             summary = "Count field recommendations by field and status",
             description = "Counts per field and review status for the filter chips. With exportBatchId the answer "
                     + "also carries the batch's state, so a SUPERSEDED cycle shows on the review screen.")
+    @APIResponse(
+            responseCode = "404",
+            description = "Nothing of that id in the caller's tenant (BATCH_NOT_FOUND)",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     public SummaryView summary(@QueryParam("exportBatchId") String exportBatchId) {
         String batchId = blankToNull(exportBatchId);
         String state = batchId == null
@@ -211,6 +206,10 @@ public class VendorReviewResource {
             summary = "Read a field recommendation",
             description = "The stored document with the vendor's evidence, the review history and the version a "
                     + "decision must send back.")
+    @APIResponse(
+            responseCode = "404",
+            description = "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND)",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     public FieldView field(@PathParam("id") String id) {
         return FieldView.of(require(id));
     }
@@ -228,6 +227,10 @@ public class VendorReviewResource {
             summary = "List a field recommendation's audit events",
             description = "The field's decision and release events from vendor_review_events, oldest first. The "
                     + "trail outlives the document: a trail that exists is returned even when the document is gone.")
+    @APIResponse(
+            responseCode = "404",
+            description = "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND)",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     public Items<EventView> events(@PathParam("id") String id) {
         List<AuditEvent> trail = audit.trailForField(ctx.tenantId(), id, TRAIL_LIMIT);
         if (trail.isEmpty()) {
@@ -250,6 +253,10 @@ public class VendorReviewResource {
             summary = "Read one practitioner's field recommendations",
             description = "Every document of one practitioner in one batch, practitioner-level fields first, then "
                     + "by location. Without exportBatchId, the batch of the practitioner's newest staged document.")
+    @APIResponse(
+            responseCode = "404",
+            description = "Nothing of that id in the caller's tenant (PRACTITIONER_NOT_FOUND)",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     public PractitionerFieldsView practitioner(
             @PathParam("certifyPractitionerId") String certifyPractitionerId,
             @QueryParam("exportBatchId") String exportBatchId) {
@@ -271,6 +278,10 @@ public class VendorReviewResource {
             summary = "Read one NPI's field recommendations",
             description = "The practitioner view looked up by NPI, for screens that start from an NPI. Without "
                     + "exportBatchId, the batch of the NPI's newest staged document.")
+    @APIResponse(
+            responseCode = "404",
+            description = "Nothing of that id in the caller's tenant (PRACTITIONER_NOT_FOUND)",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     public PractitionerFieldsView npi(@PathParam("npi") String npi, @QueryParam("exportBatchId") String exportBatchId) {
         return grouped(recommendations.forNpi(ctx.tenantId(), npi, blankToNull(exportBatchId), VIEW_LIMIT));
     }
@@ -292,6 +303,15 @@ public class VendorReviewResource {
                     + "REJECTED are final. One guarded update with its audit event; a state that does not allow the "
                     + "action, a stale version or a lost race answers 409 with the current state and who decided "
                     + "last.")
+    @APIResponse(
+            responseCode = "404",
+            description = "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND)",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
+    @APIResponse(
+            responseCode = "409",
+            description = "The document's state does not allow the decision or its version moved "
+                    + "(DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version and lastDecisionBy",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     public FieldView decide(@PathParam("id") String id, DecisionBody body) {
         DecisionRequest request = body == null
                 ? new DecisionRequest(id, null, null, null)
@@ -341,8 +361,13 @@ public class VendorReviewResource {
             throw ProblemException.notFound(
                     "PRACTITIONER_NOT_FOUND", "no field recommendations for that practitioner in the caller's tenant");
         }
-        FieldRecommendation first = docs.get(0);
-        return new PractitionerFieldsView(first.practitioner(), first.exportBatchId(), FieldView.of(docs));
+        // The practitioner as the newest staged document carries it (ties broken by id).
+        FieldRecommendation newest = docs.stream()
+                .max(Comparator.comparing(
+                                FieldRecommendation::stagedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(FieldRecommendation::id))
+                .orElseThrow();
+        return new PractitionerFieldsView(newest.practitioner(), newest.exportBatchId(), FieldView.of(docs));
     }
 
     private FieldRecommendation require(String id) {

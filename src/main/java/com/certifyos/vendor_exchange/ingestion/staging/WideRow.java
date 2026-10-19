@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -119,10 +120,11 @@ public record WideRow(
     /**
      * Whether the row is about a practitioner, the only entity this mapping stages.
      *
-     * @return true when {@code entity_type} is {@code PRACTITIONER}
+     * @return true when {@code entity_type} is {@code PRACTITIONER} in any case, trimmed; the export
+     *     sends {@code practitioner} and a vendor may echo it as sent
      */
     public boolean isPractitioner() {
-        return CandorRecsMapping.ENTITY_PRACTITIONER.equals(entityType);
+        return entityType != null && CandorRecsMapping.ENTITY_PRACTITIONER.equalsIgnoreCase(entityType.strip());
     }
 
     private static FieldCell cellOf(Map<String, FileIngestionCell> values, String field) {
@@ -130,7 +132,8 @@ public record WideRow(
         return new FieldCell(
                 field,
                 CandorRecsMapping.levelOf(field),
-                status == null ? "" : status.strip(),
+                // VALID and INVALID in any case: the chunk builder matches the canonical form.
+                status == null ? "" : status.strip().toUpperCase(Locale.ROOT),
                 sentValueOf(values, field),
                 valueOf(values, CandorRecsMapping.column(field, Suffix.VALUE)),
                 reasonsOf(valueOf(values, CandorRecsMapping.column(field, Suffix.REASON))),

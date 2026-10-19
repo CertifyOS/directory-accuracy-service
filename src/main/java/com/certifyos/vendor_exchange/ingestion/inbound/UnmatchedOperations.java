@@ -13,6 +13,7 @@ import com.certifyos.vendor_exchange.ingestion.events.IngestionRequests;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle.Outcome;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
+import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Instant;
@@ -129,14 +130,15 @@ public class UnmatchedOperations {
      * @param now the time of the write
      * @return the upload, the entry's state and the job this call enqueued
      * @throws ProblemException 404 {@code UNMATCHED_NOT_FOUND} for a missing row or one in another
-     *     tenant's folder, 404 {@code BATCH_NOT_FOUND}, 409 {@code ALREADY_RESOLVED}, 409 {@code
+     *     tenant's folder, 409 {@code TENANT_MISMATCH} for a row whose file names another tenant, 404
+     *     {@code BATCH_NOT_FOUND}, 409 {@code ALREADY_RESOLVED}, 409 {@code
      *     ATTACH_NOT_ALLOWED} for a batch that is not delivered or moved under the request, 409 {@code
      *     ALREADY_CLAIMED} for an upload already on a batch, 400 {@code REASON_REQUIRED}, or 400
      *     {@code INVALID_REQUEST} without a batch id
      */
     public Attached attach(
             String tenantId, String uploadId, String exportBatchId, String reason, String actor, Instant now) {
-        UnmatchedUpload row = requireOpen(tenantId, uploadId);
+        UnmatchedUpload row = requireSameTenantFile(tenantId, requireOpen(tenantId, uploadId));
         if (exportBatchId == null || exportBatchId.isBlank()) {
             throw ProblemException.badRequest("INVALID_REQUEST", "exportBatchId is required");
         }
@@ -252,6 +254,17 @@ public class UnmatchedOperations {
         return row;
     }
 
+    /** The file names another tenant: tenant disagreement is never ingested into the caller's, 409. */
+    private static UnmatchedUpload requireSameTenantFile(String tenantId, UnmatchedUpload row) {
+        if (row.parsed() != null && !tenantId.equals(row.parsed().fileTenant())) {
+            throw ProblemException.conflict(
+                    InboundNames.TENANT_MISMATCH,
+                    "upload " + row.id() + " names tenant " + row.parsed().fileTenant()
+                            + "; it cannot be attached here");
+        }
+        return row;
+    }
+
     private static ProblemException alreadyResolved(String uploadId) {
         return ProblemException.conflict("ALREADY_RESOLVED", "unmatched upload " + uploadId + " is already resolved");
     }
@@ -313,9 +326,9 @@ public class UnmatchedOperations {
                 + parsed.fileDate();
     }
 
-    /** The object name: everything between the first and last legs of the upload id. */
+    /** The object name: everything between the first and last legs of the upload id, unescaped. */
     private static String objectName(String uploadId) {
-        return uploadId.substring(uploadId.indexOf(SEPARATOR) + 1, uploadId.lastIndexOf(SEPARATOR));
+        return Ids.objectNameOf(uploadId.substring(uploadId.indexOf(SEPARATOR) + 1, uploadId.lastIndexOf(SEPARATOR)));
     }
 
     /** The generation: the last leg of the upload id. */
