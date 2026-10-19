@@ -34,7 +34,7 @@ public interface DalSliceClient {
     @GET
     @Path("/core/practitioner/{sourceType}/{crosswalkId}")
     Slice practitioner(
-            @HeaderParam("requesting-organization-id") String tenantId,
+            @HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId,
             @PathParam("sourceType") String sourceType,
             @PathParam("crosswalkId") String crosswalkId);
 
@@ -49,7 +49,7 @@ public interface DalSliceClient {
     @GET
     @Path("/core/locations/{sourceType}/{crosswalkId}")
     Slice location(
-            @HeaderParam("requesting-organization-id") String tenantId,
+            @HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId,
             @PathParam("sourceType") String sourceType,
             @PathParam("crosswalkId") String crosswalkId);
 
@@ -64,7 +64,7 @@ public interface DalSliceClient {
     @GET
     @Path("/core/entity-addresses/{sourceType}/{crosswalkId}")
     Slice entityAddress(
-            @HeaderParam("requesting-organization-id") String tenantId,
+            @HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId,
             @PathParam("sourceType") String sourceType,
             @PathParam("crosswalkId") String crosswalkId);
 }

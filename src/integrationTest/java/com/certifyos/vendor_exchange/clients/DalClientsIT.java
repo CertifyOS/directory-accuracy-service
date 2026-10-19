@@ -66,7 +66,7 @@ class DalClientsIT {
     private static RequestPatternBuilder withDalHeaders(RequestPatternBuilder pattern) {
         return pattern.withHeader("Authorization", WireMock.equalTo("Bearer dal-id-token"))
                 .withHeader("requesting-user-id", WireMock.equalTo(DalUserClient.REQUESTING_USER_ID))
-                .withHeader("requesting-organization-id", WireMock.equalTo(TENANT));
+                .withHeader(DalUserClient.ORGANIZATION_HEADER, WireMock.equalTo(TENANT));
     }
 
     @Test
@@ -155,6 +155,11 @@ class DalClientsIT {
                 WebApplicationException.class, () -> slices.practitioner(TENANT, SOURCE_TYPE, "cert-none"));
 
         Assertions.assertEquals(404, missing.getResponse().getStatus());
+        // The DAL also answers 404 when a required header is missing; the headers were all there.
+        WireMockDal.verify(
+                1,
+                withDalHeaders(
+                        WireMock.getRequestedFor(WireMock.urlEqualTo("/core/practitioner/candor:org-a/cert-none"))));
     }
 
     @Test

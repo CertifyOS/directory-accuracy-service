@@ -32,7 +32,7 @@ public interface DalOperationalValueClient {
     @GET
     @Path("/practitioners/ov/{entityId}")
     OperationalValue practitioner(
-            @HeaderParam("requesting-organization-id") String tenantId, @PathParam("entityId") String certifyId);
+            @HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId, @PathParam("entityId") String certifyId);
 
     /**
      * Reads a location's operational value.
@@ -44,5 +44,5 @@ public interface DalOperationalValueClient {
     @GET
     @Path("/locations/ov/{entityId}")
     OperationalValue location(
-            @HeaderParam("requesting-organization-id") String tenantId, @PathParam("entityId") String certifyId);
+            @HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId, @PathParam("entityId") String certifyId);
 }

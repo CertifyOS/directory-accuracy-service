@@ -56,10 +56,10 @@ class ArchitectureTest {
     @ArchTest
     static final ArchRule exportDoesNotDependOnIngestion = ArchRuleDefinition.noClasses()
             .that()
-            .resideInAPackage("..export..")
+            .resideInAPackage("..vendor_exchange.export..")
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("..ingestion..")
+            .resideInAPackage("..vendor_exchange.ingestion..")
             .allowEmptyShould(true);
 
     /** No package cycles between the top-level slices. */

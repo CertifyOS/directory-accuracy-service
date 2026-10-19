@@ -13,6 +13,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import java.io.InputStream;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
@@ -174,6 +175,37 @@ class FileIngestionClientIT {
                 WebApplicationException.class, () -> fileIngestion.rows(TENANT, IDENTIFIER, "ing-busy", null));
 
         Assertions.assertEquals(429, refused.getResponse().getStatus());
+        WireMockUpstreams.verify(
+                1,
+                WireMock.getRequestedFor(WireMock.urlPathEqualTo("/v1/ingestion-rows/ing-busy"))
+                        .withQueryParam("after", WireMock.absent()));
+    }
+
+    @Test
+    void statusParsesCountsAndInstants() {
+        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlEqualTo("/v1/ingestion/ing-status"))
+                .willReturn(WireMock.okJson("{\"ingestionId\":\"ing-status\",\"status\":\"PARTIAL\","
+                        + "\"counts\":{\"populatedRows\":120,\"validRows\":118,\"invalidRows\":2},"
+                        + "\"registeredAt\":\"2026-10-15T08:00:00Z\",\"terminalAt\":\"2026-10-15T08:20:30Z\","
+                        + "\"invalidReason\":null,\"mappingId\":\"map-1\"}")));
+
+        FileIngestionStatus status = fileIngestion.status(TENANT, IDENTIFIER, "ing-status");
+
+        Assertions.assertEquals(
+                new FileIngestionStatus(
+                        "ing-status",
+                        "PARTIAL",
+                        new FileIngestionCounts(120L, 118L, 2L),
+                        Instant.parse("2026-10-15T08:00:00Z"),
+                        Instant.parse("2026-10-15T08:20:30Z"),
+                        null),
+                status);
+        WireMockUpstreams.verify(
+                1,
+                WireMock.getRequestedFor(WireMock.urlEqualTo("/v1/ingestion/ing-status"))
+                        .withHeader(FileIngestionClient.TENANT_HEADER, WireMock.equalTo(TENANT))
+                        .withHeader(FileIngestionClient.IDENTIFIER_HEADER, WireMock.equalTo(IDENTIFIER))
+                        .withHeader("Authorization", WireMock.equalTo("Bearer tok")));
     }
 
     @Test

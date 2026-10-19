@@ -32,7 +32,7 @@ public interface DalTenantConfigClient {
     @GET
     @Path("/tenants/{tenantId}/configurations")
     TenantConfigurationPage list(
-            @HeaderParam("requesting-organization-id") String tenantId,
+            @HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId,
             @PathParam("tenantId") String pathTenantId,
             @QueryParam("page") int page,
             @QueryParam("size") int size);

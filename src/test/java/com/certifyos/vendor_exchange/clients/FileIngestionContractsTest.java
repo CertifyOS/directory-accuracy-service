@@ -36,4 +36,19 @@ class FileIngestionContractsTest {
         Assertions.assertEquals("INVALID", practiceName.status());
         Assertions.assertEquals(List.of("maxLength: too long"), practiceName.problems());
     }
+
+    @Test
+    void rowKeepsColumnOrderAndANullCell() throws Exception {
+        FileIngestionRow row = mapper.readValue(
+                """
+                {"sheet":"S","row":1,"status":"VALID",
+                 "values":{"zip":{"value":"80111","status":"VALID"},"fax":null,"city":{"value":"Denver","status":"VALID"}}}
+                """,
+                FileIngestionRow.class);
+
+        Assertions.assertEquals(
+                List.of("zip", "fax", "city"), List.copyOf(row.values().keySet()));
+        Assertions.assertNull(row.values().get("fax"));
+        Assertions.assertEquals(List.of(), row.warnings());
+    }
 }

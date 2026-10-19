@@ -35,5 +35,5 @@ public interface DalBatchClient {
     @POST
     @Path("/batch")
     @Consumes(MediaType.APPLICATION_JSON)
-    Response execute(@HeaderParam("requesting-organization-id") String tenantId, DalBatchRequest body);
+    Response execute(@HeaderParam(DalUserClient.ORGANIZATION_HEADER) String tenantId, DalBatchRequest body);
 }
