@@ -51,7 +51,7 @@ class InboundNamesTest {
     }
 
     @Test
-    void refWithUnderscoreIsRejected() {
+    void refEndsAtTheFirstUnderscore() {
         Parsed split = InboundNames.parse("to/org-xyz/org-xyz_org_ref_CB-1_20261015.csv")
                 .orElseThrow();
         Assertions.assertEquals("org", split.exportBatchRef(), "the ref ends at its first underscore");

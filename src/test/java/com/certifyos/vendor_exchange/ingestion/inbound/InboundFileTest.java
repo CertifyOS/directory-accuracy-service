@@ -229,6 +229,14 @@ class InboundFileTest {
     }
 
     @Test
+    void immutableDispositionsCanBePassedBackIn() {
+        InboundFile base = stagedSample();
+
+        Assertions.assertEquals(
+                base.dispositions(), withDispositions(base, base.dispositions()).dispositions());
+    }
+
+    @Test
     void nullDispositionCountIsRefused() {
         Map<String, Long> source = new LinkedHashMap<>();
         source.put("STAGED", null);

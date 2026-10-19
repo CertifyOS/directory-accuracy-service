@@ -5,6 +5,7 @@ import com.certifyos.vendor_exchange.persistence.Documents;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import org.bson.Document;
 
 /**
@@ -157,7 +158,7 @@ public record InboundFile(
     }
 
     public InboundFile {
-        if (dispositions != null && dispositions.containsValue(null)) {
+        if (dispositions != null && dispositions.values().stream().anyMatch(Objects::isNull)) {
             throw new IllegalArgumentException("dispositions must not hold a null count: " + uploadId);
         }
         dispositions = dispositions == null ? Map.of() : Map.copyOf(dispositions);

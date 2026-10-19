@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * {@code to/<tenant>/<tenant>_<exportBatchRef>_<vendorBatchId>_<yyyyMMdd>.csv}, and the service
  * archives it as {@code <tenantId>/<exportBatchId>/<generation>/<fileName>}. Tenant ids and export
  * batch ids never contain an underscore, so those legs split exactly; the vendor batch id is
- * whatever lies between the batch ref and the date. A ref containing an underscore is refused, and
+ * whatever lies between the batch ref and the date. The ref ends at the first underscore after the tenant (export batch ids carry hyphens only), and
  * every leg is limited to letters, digits, {@code .} and {@code -} (the vendor id also allows
  * {@code _}), with {@code .} and {@code ..} refused.
  */
