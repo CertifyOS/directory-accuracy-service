@@ -2,6 +2,7 @@ package com.certifyos.vendor_exchange.persistence;
 
 import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -129,6 +130,32 @@ public final class Ids {
      */
     public static String uploadId(String bucket, String objectName, String generation) {
         return join(leg("bucket", bucket), escapedLeg("objectName", objectName), leg("generation", generation));
+    }
+
+    /**
+     * The object name an upload id's middle leg stands for: the inverse of the escape in {@link
+     * #uploadId}.
+     *
+     * @param escaped the middle leg of an upload id
+     * @return the object name as Cloud Storage holds it
+     */
+    public static String objectNameOf(String escaped) {
+        if (escaped.indexOf('%') < 0) {
+            return escaped;
+        }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(escaped.length());
+        int index = 0;
+        while (index < escaped.length()) {
+            if (escaped.charAt(index) == '%' && index + 3 <= escaped.length()) {
+                bytes.write(HexFormat.fromHexDigits(escaped, index + 1, index + 3));
+                index += 3;
+            } else {
+                int codePoint = escaped.codePointAt(index);
+                bytes.writeBytes(new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8));
+                index += Character.charCount(codePoint);
+            }
+        }
+        return bytes.toString(StandardCharsets.UTF_8);
     }
 
     /**

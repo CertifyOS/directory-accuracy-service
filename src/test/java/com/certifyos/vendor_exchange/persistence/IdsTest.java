@@ -95,6 +95,10 @@ class IdsTest {
         Assertions.assertEquals("bkt|a%7Cb%25c%09d%C2%A0e|1", Ids.uploadId("bkt", "a|b%c\td\u00a0e", "1"));
         Assertions.assertNotEquals(Ids.uploadId("bkt", "a b", "1"), Ids.uploadId("bkt", "a%20b", "1"));
         Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("bkt", " ", "1"));
+        for (String name : new String[] {"plain/name.csv", "Copy of results.csv", "a|b%c\td\u00a0e", "tést 😀.csv"}) {
+            String leg = Ids.uploadId("bkt", name, "1").split("\\|", -1)[1];
+            Assertions.assertEquals(name, Ids.objectNameOf(leg), "the escape is undone exactly");
+        }
     }
 
     @Test
