@@ -2,7 +2,11 @@ package com.certifyos.vendor_exchange.persistence;
 
 import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.YearMonth;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
@@ -99,6 +103,118 @@ public final class Ids {
             throw new IllegalArgumentException("not a correlation id: " + correlationId);
         }
         return correlationId.substring(0, suffix);
+    }
+
+    /**
+     * Release id: {@code rel-<uuid v7>}.
+     *
+     * @return a new release id
+     */
+    public static String releaseId() {
+        return "rel-" + EVENT_IDS.generate();
+    }
+
+    /**
+     * Inbound file id: {@code <bucket>|<objectName>|<generation>}.
+     *
+     * @param bucket the storage bucket
+     * @param objectName the object name
+     * @param generation the object generation
+     * @return the upload id
+     */
+    public static String uploadId(String bucket, String objectName, String generation) {
+        return join(leg("bucket", bucket), leg("objectName", objectName), leg("generation", generation));
+    }
+
+    /**
+     * External reference of an inbound file: {@code <exportBatchId>|<generation>}.
+     *
+     * @param exportBatchId the batch
+     * @param generation the object generation
+     * @return the external reference
+     */
+    public static String externalRef(String exportBatchId, String generation) {
+        return join(leg("exportBatchId", exportBatchId), leg("generation", generation));
+    }
+
+    /**
+     * Field recommendation id: tenant, source, batch, practitioner, location and field joined with
+     * {@code |}, with {@code -} for a practitioner-level field that has no location.
+     *
+     * @param tenantId the tenant
+     * @param source the vendor source
+     * @param exportBatchId the batch
+     * @param certifyPractitionerId the practitioner
+     * @param certifyLocationId the location, or null for a practitioner-level field
+     * @param field the field name
+     * @return the recommendation id
+     */
+    public static String fieldRecommendationId(
+            String tenantId,
+            String source,
+            String exportBatchId,
+            String certifyPractitionerId,
+            String certifyLocationId,
+            String field) {
+        return join(
+                leg("tenantId", tenantId),
+                leg("source", source),
+                leg("exportBatchId", exportBatchId),
+                leg("certifyPractitionerId", certifyPractitionerId),
+                optionalLeg("certifyLocationId", certifyLocationId),
+                leg("field", field));
+    }
+
+    /**
+     * Rejected value id: four readable legs, then the SHA-256 of the normalised value, so the raw
+     * value never appears in an id or a log line.
+     *
+     * @param tenantId the tenant
+     * @param certifyPractitionerId the practitioner
+     * @param certifyLocationId the location, or null for a practitioner-level field
+     * @param field the field name
+     * @param normalizedValue the normalised value that was rejected
+     * @return the rejected value id
+     */
+    public static String rejectedValueId(
+            String tenantId,
+            String certifyPractitionerId,
+            String certifyLocationId,
+            String field,
+            String normalizedValue) {
+        return join(
+                leg("tenantId", tenantId),
+                leg("certifyPractitionerId", certifyPractitionerId),
+                optionalLeg("certifyLocationId", certifyLocationId),
+                leg("field", field),
+                sha256Hex(leg("normalizedValue", normalizedValue)));
+    }
+
+    private static String join(String... legs) {
+        return String.join("|", legs);
+    }
+
+    private static String optionalLeg(String name, String value) {
+        return value == null ? "-" : leg(name, value);
+    }
+
+    private static String leg(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be null or blank");
+        }
+        if (value.indexOf('|') >= 0) {
+            throw new IllegalArgumentException(name + " must not contain '|'");
+        }
+        return value;
+    }
+
+    private static String sha256Hex(String value) {
+        try {
+            return HexFormat.of()
+                    .formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required of every Java platform", exception);
+        }
     }
 
     private static String requireTenant(String tenantId) {

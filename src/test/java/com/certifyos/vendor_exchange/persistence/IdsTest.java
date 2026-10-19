@@ -64,4 +64,61 @@ class IdsTest {
             Assertions.assertEquals(7, UUID.fromString(id.substring(3)).version());
         }
     }
+
+    @Test
+    void fieldRecommendationIdJoinsTheLegsWithPipes() {
+        Assertions.assertEquals(
+                "org-xyz|candor|org-xyz-candor-2026-10-001|cert-000123|loc-7781|phone",
+                Ids.fieldRecommendationId(
+                        "org-xyz", "candor", "org-xyz-candor-2026-10-001", "cert-000123", "loc-7781", "phone"));
+    }
+
+    @Test
+    void fieldRecommendationIdUsesADashForAPractitionerLevelField() {
+        Assertions.assertEquals(
+                "org-xyz|candor|org-xyz-candor-2026-10-001|cert-000123|-|npi",
+                Ids.fieldRecommendationId(
+                        "org-xyz", "candor", "org-xyz-candor-2026-10-001", "cert-000123", null, "npi"));
+    }
+
+    @Test
+    void uploadIdAndExternalRefUseThePipeSeparator() {
+        Assertions.assertEquals(
+                "bkt|dir/file.csv|1760520000123456", Ids.uploadId("bkt", "dir/file.csv", "1760520000123456"));
+        Assertions.assertEquals("b|1760520000123456", Ids.externalRef("b", "1760520000123456"));
+    }
+
+    @Test
+    void rejectedValueIdEndsWithTheSha256OfTheNormalisedValue() throws Exception {
+        String expected = java.util.HexFormat.of()
+                .formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest("3036790177".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        String id = Ids.rejectedValueId("org-xyz", "cert-000123", "loc-7781", "phone", "3036790177");
+        Assertions.assertEquals("org-xyz|cert-000123|loc-7781|phone|" + expected, id);
+        Assertions.assertTrue(id.matches(".*\\|[0-9a-f]{64}$"));
+        Assertions.assertEquals(
+                "org-xyz|cert-000123|-|phone|" + expected,
+                Ids.rejectedValueId("org-xyz", "cert-000123", null, "phone", "3036790177"));
+    }
+
+    @Test
+    void releaseIdIsVersionSevenPrefixed() {
+        String id = Ids.releaseId();
+        Assertions.assertTrue(id.startsWith("rel-"));
+        Assertions.assertEquals(7, UUID.fromString(id.substring(4)).version());
+        Assertions.assertNotEquals(id, Ids.releaseId());
+    }
+
+    @Test
+    void aLegWithAPipeOrNothingInItIsRefused() {
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b|k", "o", "1"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b", " ", "1"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.externalRef(null, "1"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.fieldRecommendationId("t", "s", "b", "p|q", null, "phone"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.fieldRecommendationId("t", "s", "b", "p", "", "phone"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.rejectedValueId("t", "p", null, "phone", "a|b"));
+    }
 }
