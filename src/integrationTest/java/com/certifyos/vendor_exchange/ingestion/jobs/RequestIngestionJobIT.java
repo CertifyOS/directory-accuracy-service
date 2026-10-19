@@ -16,6 +16,7 @@ import com.certifyos.vendor_exchange.ingestion.InboundFixtures.Seeded;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
+import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Ids;
@@ -27,6 +28,7 @@ import io.quarkus.test.InjectMock;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.quarkus.test.junit.mockito.InjectSpy;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
 import java.time.Duration;
@@ -79,6 +81,9 @@ class RequestIngestionJobIT {
 
     @InjectMock
     ArchiveStore archive;
+
+    @InjectSpy
+    InboundLifecycle lifecycle;
 
     @InjectMock
     ApiLayerTokenService tokens;
@@ -385,6 +390,50 @@ class RequestIngestionJobIT {
 
         Assertions.assertEquals(400, refused.getResponse().getStatus());
         Assertions.assertEquals(InboundFileState.ARCHIVING, entry(seeded).state(), "left for the JobRunr retry");
+    }
+
+    @Test
+    void crashBetweenScheduleAndCommitLeavesTheCheckAndTheRerunCommitsWithoutRescheduling() {
+        Seeded seeded = seed("reqing-crash", InboundFileState.RECEIVED);
+        archiveCopies(seeded, false);
+        stubRegister(seeded, 201, "{\"ingestionId\":\"ing-reqing-crash\",\"status\":\"RECEIVED\"}");
+        Mockito.doThrow(new IllegalStateException("worker died before the commit"))
+                .doCallRealMethod()
+                .when(lifecycle)
+                .ingestionRequested(
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.any(),
+                        ArgumentMatchers.any());
+
+        Assertions.assertThrows(IllegalStateException.class, () -> run(seeded));
+
+        InboundFile crashed = entry(seeded);
+        Assertions.assertEquals(InboundFileState.ARCHIVING, crashed.state(), "the commit never happened");
+        Assertions.assertEquals(archivePath(seeded), crashed.archivePath());
+        org.jobrunr.jobs.Job scheduled = storage.getJobById(deadlineId(seeded));
+        Assertions.assertEquals(StateName.SCHEDULED, scheduled.getState(), "the check exists before the commit");
+        Instant firstAt = ((ScheduledState) scheduled.getJobState()).getScheduledAt();
+
+        run(seeded);
+
+        assertRequested(seeded, "ing-reqing-crash");
+        Mockito.verify(archive, Mockito.times(1))
+                .copy(
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.anyLong(),
+                        ArgumentMatchers.anyString(),
+                        ArgumentMatchers.anyString());
+        org.jobrunr.jobs.Job after = storage.getJobById(deadlineId(seeded));
+        Assertions.assertEquals(StateName.SCHEDULED, after.getState());
+        Assertions.assertEquals(1, after.getJobStates().size(), "the rerun did not schedule a second time");
+        Assertions.assertEquals(
+                firstAt, ((ScheduledState) after.getJobState()).getScheduledAt(), "JobRunr kept the first schedule");
     }
 
     @Test

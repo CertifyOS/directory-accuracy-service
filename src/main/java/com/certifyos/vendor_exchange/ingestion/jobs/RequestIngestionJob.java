@@ -33,7 +33,9 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
 
 /**
  * Design step 3: archive the exact generation of the vendor's upload, then register the archive
- * location with file-ingestion and schedule the deadline check. Works from {@code RECEIVED} or, on a
+ * location with file-ingestion, schedule the deadline check, then move the entry to {@code
+ * INGESTION_REQUESTED} (schedule first, so no committed entry is ever left without its check). Works
+ * from {@code RECEIVED} or, on a
  * retry, {@code ARCHIVING}; an entry that already carries {@code archivePath} skips the copy. The
  * archive store, file-ingestion and the enqueuer are called outside every transaction; the lifecycle
  * owns the writes. A register 422 or 403 and a missing source fail the entry; any other 4xx, every
@@ -152,7 +154,12 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
         }
         Instant now = clock.instant();
         Instant deadlineAt = now.plus(Duration.ofHours(cfg.ingestion().ingestionDeadlineHours()));
-        UUID deadlineJobId = IngestionJobEnqueuer.deadlineCheckId(entry.uploadId(), entry.attempt());
+        // Schedule before the commit. A worker death between the two leaves a deadline check that
+        // finds the entry still ARCHIVING and exits as a no-op, while JobRunr reruns this job; the
+        // rerun schedules the same id (JobRunr keeps the existing job) and then commits. The other
+        // order would leave an INGESTION_REQUESTED entry, which only its deadline check moves,
+        // with no check scheduled.
+        UUID deadlineJobId = enqueuer.deadlineCheck(batch.id(), entry.uploadId(), entry.attempt(), deadlineAt);
         boolean moved = lifecycle.ingestionRequested(
                 located,
                 registered.get().ingestionId(),
@@ -163,8 +170,6 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
                 deadlineAt,
                 now);
         if (moved) {
-            // After the commit: the id is already on the entry, so a deadline check that runs finds it.
-            enqueuer.deadlineCheck(batch.id(), entry.uploadId(), entry.attempt(), deadlineAt);
             LOG.infof(
                     "%s upload %s: ingestion %s requested, deadline check %s at %s",
                     batch.id(), entry.uploadId(), registered.get().ingestionId(), deadlineJobId, deadlineAt);

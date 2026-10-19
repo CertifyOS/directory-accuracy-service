@@ -23,8 +23,8 @@ public class IngestionJobEnqueuer {
     }
 
     /**
-     * The id of the deadline check for an upload attempt. The request job writes it on the entry
-     * before {@link #deadlineCheck} schedules a job under the same id.
+     * The id of the deadline check for an upload attempt: what {@link #deadlineCheck} schedules and
+     * the request job then writes on the entry as its {@code jobId}.
      *
      * @param uploadId the upload
      * @param attempt the entry's attempt
