@@ -3,6 +3,7 @@ package com.certifyos.vendor_exchange.ingestion.jobs;
 import com.certifyos.vendor_exchange.clients.FileIngestionClient;
 import com.certifyos.vendor_exchange.clients.FileIngestionStatus;
 import com.certifyos.vendor_exchange.export.jobs.JobLogContext;
+import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileState;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
@@ -46,7 +47,7 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
     static final String INVALID = "INVALID";
 
     private static final Set<InboundFileState> EXPECTED =
-            EnumSet.of(InboundFileState.INGESTION_REQUESTED, InboundFileState.ARCHIVING);
+            EnumSet.of(InboundFileState.INGESTION_REQUESTED, InboundFileState.ARCHIVING, InboundFileState.PARSED);
     private static final Logger LOG = Logger.getLogger(IngestionDeadlineCheckJob.class);
 
     private final InboundJobSupport support;
@@ -91,6 +92,10 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
             if (loaded.isEmpty()) {
                 return;
             }
+            if (loaded.get().entry().state() == InboundFileState.PARSED) {
+                handOverIfStillOwned(loaded.get(), job);
+                return;
+            }
             if (loaded.get().entry().state() == InboundFileState.ARCHIVING) {
                 throw new IllegalStateException("ingestion deadline check " + request
                         + " found the entry still ARCHIVING; the request job has not committed, retrying");
@@ -125,6 +130,32 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
         }
         lifecycle.failed(
                 located, InboundFileState.INGESTION_REQUESTED, STEP_PARSE, DID_NOT_FINISH, found, attempts, now);
+    }
+
+    /**
+     * A {@code PARSED} entry whose job id is still this check's: the parse committed (by this check's
+     * earlier run, or by the completion handler) and the stage hand-over did not, so JobRunr's retry or
+     * this scheduled run finishes it. The stage job id is deterministic, so an enqueue that had landed
+     * is a no-op. An entry already handed to a stage job is left alone.
+     */
+    private void handOverIfStillOwned(Located located, JobContext job) {
+        InboundFile entry = located.entry();
+        String deadline = IngestionJobEnqueuer.deadlineCheckId(entry.uploadId(), entry.attempt())
+                .toString();
+        String running = job == null || job == JobContext.Null || job.getJobId() == null
+                ? null
+                : job.getJobId().toString();
+        if (entry.jobId() != null
+                && (entry.jobId().equals(deadline) || entry.jobId().equals(running))) {
+            LOG.infof(
+                    "%s upload %s is PARSED without its stage job; handing it over",
+                    located.batch().id(), entry.uploadId());
+            handToStaging(located);
+            return;
+        }
+        LOG.infof(
+                "%s upload %s is PARSED and owned by job %s; nothing to do",
+                located.batch().id(), entry.uploadId(), entry.jobId());
     }
 
     /**
