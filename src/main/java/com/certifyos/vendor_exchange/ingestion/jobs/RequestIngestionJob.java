@@ -38,8 +38,9 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
  * from {@code RECEIVED} or, on a
  * retry, {@code ARCHIVING}; an entry that already carries {@code archivePath} skips the copy. The
  * archive store, file-ingestion and the enqueuer are called outside every transaction; the lifecycle
- * owns the writes. A register 422 or 403 and a missing source fail the entry; any other 4xx, every
- * 5xx and every connection error propagate for the JobRunr retry.
+ * owns the writes. A register 422 or 403 and a missing source fail the entry; any other 4xx
+ * propagates as {@link RegisterClientErrorException}, and every 5xx and connection error as itself,
+ * for the JobRunr retry. When the retries run out, the final-failure filter fails the entry.
  */
 @ApplicationScoped
 public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJobRequest> {
@@ -58,6 +59,7 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
             EnumSet.of(InboundFileState.RECEIVED, InboundFileState.ARCHIVING);
     private static final int CREATED = 201;
     private static final int OK = 200;
+    private static final int CLIENT_ERROR = 400;
     private static final int FORBIDDEN = 403;
     private static final int UNPROCESSABLE = 422;
     private static final int SERVER_ERROR = 500;
@@ -239,15 +241,7 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
             LOG.infof(
                     "%s upload %s: register answered %d",
                     batch.id(), located.entry().uploadId(), status);
-            String reason =
-                    switch (status) {
-                        case UNPROCESSABLE -> MAPPING_UNKNOWN;
-                        case FORBIDDEN -> FILE_INGESTION_REFUSED;
-                        default -> null;
-                    };
-            if (reason == null) {
-                throw refused;
-            }
+            String reason = failureReason(refused, status);
             lifecycle.failed(
                     located,
                     InboundFileState.ARCHIVING,
@@ -258,6 +252,25 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
                     clock.instant());
             return Optional.empty();
         }
+    }
+
+    /**
+     * The reason a refused register fails the entry with now: 422 {@code MAPPING_UNKNOWN}, 403
+     * {@code FILE_INGESTION_REFUSED}. Any other answer is thrown for the JobRunr retry: another 4xx as
+     * {@link RegisterClientErrorException}, so the final-failure filter records {@code
+     * SOURCE_UNREADABLE} once the retries run out, and anything else as the refusal itself.
+     */
+    private static String failureReason(WebApplicationException refused, int status) {
+        return switch (status) {
+            case UNPROCESSABLE -> MAPPING_UNKNOWN;
+            case FORBIDDEN -> FILE_INGESTION_REFUSED;
+            default -> {
+                if (status >= CLIENT_ERROR && status < SERVER_ERROR) {
+                    throw new RegisterClientErrorException(status, refused);
+                }
+                throw refused;
+            }
+        };
     }
 
     /** {@code HTTP <status>: <problem body>} for {@code lastError}; never logged. */
