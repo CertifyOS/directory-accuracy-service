@@ -7,7 +7,10 @@ import java.util.List;
  * parses it. The mapping itself, the body of {@code POST /v1/mappings}, is versioned beside the code
  * in {@code src/main/resources/mappings/candor-recs-v1.json}. Each of the ten fields has the value we
  * sent and five suffixed vendor columns ({@link Suffix}); the sent value of {@code location} is the
- * five address legs, and that of {@code npi} is the {@code npi} id column.
+ * five address legs, and that of {@code npi} is the {@code npi} id column. The design quotes 59
+ * columns for the September 2026 sample, while the mapping lists 67; the exact column set is
+ * reconciled against the vendor's file when the mapping is registered with file-ingestion (rollout
+ * ask 7).
  */
 public final class CandorRecsMapping {
 
