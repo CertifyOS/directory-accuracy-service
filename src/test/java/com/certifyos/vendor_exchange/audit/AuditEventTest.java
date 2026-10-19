@@ -22,6 +22,14 @@ class AuditEventTest {
         Assertions.assertEquals(AuditEventType.Scope.SERVICE, AuditEventType.EXPORT_EVENT_REJECTED.scope());
         Assertions.assertEquals(AuditEventType.Scope.BATCH, AuditEventType.INBOUND_FILE_STAGED.scope());
         Assertions.assertEquals(AuditEventType.Scope.SERVICE, AuditEventType.INBOUND_FILE_UNMATCHED.scope());
+        Assertions.assertEquals(
+                AuditEventType.Scope.SERVICE,
+                AuditEventType.INBOUND_UPLOAD_DISCARDED.scope(),
+                "a discarded unmatched upload has no export batch");
+        Assertions.assertEquals(
+                AuditEventType.Scope.BATCH,
+                AuditEventType.INBOUND_UPLOAD_ATTACHED.scope(),
+                "an attached upload names its batch");
         Assertions.assertEquals(AuditEventType.Scope.FIELD, AuditEventType.FIELD_APPROVED.scope());
         Assertions.assertEquals(AuditEventType.Scope.FIELD, AuditEventType.FIELD_RELEASE_FAILED.scope());
     }
@@ -68,13 +76,14 @@ class AuditEventTest {
         Assertions.assertFalse(doc.containsKey("attempt"));
         Assertions.assertEquals(event, AuditEvent.fromDocument(doc));
 
-        AuditEvent fileEvent = AuditEvent.forBatch(
-                        AuditEventType.INBOUND_UPLOAD_DISCARDED, "org-xyz", "candor", "org-xyz-candor-2026-10-001", 1)
+        AuditEvent fileEvent = AuditEvent.of(AuditEventType.INBOUND_UPLOAD_DISCARDED, null, null)
+                .actor("user:ops-1")
                 .upload("vendor-sftp|to/org-xyz/f.csv|1760520000123456")
                 .detail("reason", "not ours")
                 .detail("uploadId", "vendor-sftp|to/org-xyz/f.csv|1760520000123456")
                 .build();
         Document fileDoc = fileEvent.toDocument();
+        Assertions.assertFalse(fileDoc.containsKey("exportBatchId"), "a discarded upload names no batch");
         Assertions.assertFalse(fileDoc.containsKey("fieldRecommendationId"), "written only when set");
         Assertions.assertFalse(fileDoc.containsKey("certifyPractitionerId"));
         Assertions.assertFalse(fileDoc.containsKey("releaseId"));
