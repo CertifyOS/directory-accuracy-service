@@ -2,7 +2,9 @@ package com.certifyos.vendor_exchange.ingestion.inbound;
 
 import com.certifyos.vendor_exchange.ingestion.events.ArrivalEvent;
 import com.certifyos.vendor_exchange.persistence.Documents;
+import com.certifyos.vendor_exchange.persistence.Ids;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -167,7 +169,8 @@ public record InboundFile(
         if (dispositions != null && dispositions.values().stream().anyMatch(Objects::isNull)) {
             throw new IllegalArgumentException("dispositions must not hold a null count: " + uploadId);
         }
-        dispositions = dispositions == null ? Map.of() : Map.copyOf(dispositions);
+        // Insertion order is kept, so stored documents and views list dispositions in a stable order.
+        dispositions = dispositions == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(dispositions));
     }
 
     /**
@@ -180,12 +183,13 @@ public record InboundFile(
     }
 
     /**
-     * The object name: everything between the first and last legs of {@code uploadId}.
+     * The object name: everything between the first and last legs of {@code uploadId}, with the
+     * escape {@link Ids#uploadId} applies undone.
      *
-     * @return the object name
+     * @return the object name as Cloud Storage holds it
      */
     public String objectName() {
-        return uploadId.substring(firstSeparator() + 1, uploadId.lastIndexOf(SEPARATOR));
+        return Ids.objectNameOf(uploadId.substring(firstSeparator() + 1, uploadId.lastIndexOf(SEPARATOR)));
     }
 
     private int firstSeparator() {

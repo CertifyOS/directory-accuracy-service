@@ -2,6 +2,7 @@ package com.certifyos.vendor_exchange.persistence;
 
 import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -116,15 +117,45 @@ public final class Ids {
     }
 
     /**
-     * Inbound file id: {@code <bucket>|<objectName>|<generation>}.
+     * Inbound file id: {@code <bucket>|<objectName>|<generation>}. Cloud Storage allows whitespace
+     * and {@code |} in an object name, and a vendor file named that way must still reach the
+     * unmatched uploads, so the object name leg is escaped rather than refused: {@code %}, {@code |}
+     * and every whitespace character become {@code %XX} of their UTF-8 bytes. A name without them is
+     * unchanged.
      *
      * @param bucket the storage bucket
-     * @param objectName the object name
+     * @param objectName the object name, which may contain whitespace or {@code |}
      * @param generation the object generation
      * @return the upload id
      */
     public static String uploadId(String bucket, String objectName, String generation) {
-        return join(leg("bucket", bucket), leg("objectName", objectName), leg("generation", generation));
+        return join(leg("bucket", bucket), escapedLeg("objectName", objectName), leg("generation", generation));
+    }
+
+    /**
+     * The object name an upload id's middle leg stands for: the inverse of the escape in {@link
+     * #uploadId}.
+     *
+     * @param escaped the middle leg of an upload id
+     * @return the object name as Cloud Storage holds it
+     */
+    public static String objectNameOf(String escaped) {
+        if (escaped.indexOf('%') < 0) {
+            return escaped;
+        }
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(escaped.length());
+        int index = 0;
+        while (index < escaped.length()) {
+            if (escaped.charAt(index) == '%' && index + 3 <= escaped.length()) {
+                bytes.write(HexFormat.fromHexDigits(escaped, index + 1, index + 3));
+                index += 3;
+            } else {
+                int codePoint = escaped.codePointAt(index);
+                bytes.writeBytes(new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8));
+                index += Character.charCount(codePoint);
+            }
+        }
+        return bytes.toString(StandardCharsets.UTF_8);
     }
 
     /**
@@ -224,6 +255,24 @@ public final class Ids {
             throw new IllegalArgumentException(name + " must not contain whitespace");
         }
         return value;
+    }
+
+    /** A leg that may hold any text: not blank, with {@code %}, {@code |} and whitespace escaped. */
+    private static String escapedLeg(String name, String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(name + " must not be null or blank");
+        }
+        StringBuilder escaped = new StringBuilder(value.length());
+        value.codePoints().forEach(codePoint -> {
+            if (codePoint == '%' || codePoint == '|' || isWhitespace(codePoint)) {
+                for (byte part : new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8)) {
+                    escaped.append(String.format(Locale.ROOT, "%%%02X", part & 0xFF));
+                }
+            } else {
+                escaped.appendCodePoint(codePoint);
+            }
+        });
+        return escaped.toString();
     }
 
     private static boolean isWhitespace(int codePoint) {

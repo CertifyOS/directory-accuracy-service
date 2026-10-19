@@ -100,7 +100,7 @@ public class StageRowsJob implements JobRequestHandler<StageRowsJobRequest> {
                 // reconciler finds it. JobRunr retries with backoff until the switch is back on.
                 throw new IllegalStateException("service disabled; stage rows " + request + " deferred to a retry");
             }
-            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), request.attempt(), EXPECTED);
+            Optional<Located> loaded = support.loadExpecting(NAME, request, EXPECTED);
             if (loaded.isEmpty()) {
                 return;
             }
@@ -175,7 +175,7 @@ public class StageRowsJob implements JobRequestHandler<StageRowsJobRequest> {
             while (rows.hasNextValue()) {
                 chunk.add(rows.nextValue());
                 if (chunk.size() == chunkRows) {
-                    Optional<RowStager.Progress> progress = stager.stageChunk(located, chunk, clock.instant());
+                    Optional<RowStager.Progress> progress = stager.stageChunk(located, cursor, chunk, clock.instant());
                     if (progress.isEmpty()) {
                         return false;
                     }
@@ -184,7 +184,8 @@ public class StageRowsJob implements JobRequestHandler<StageRowsJobRequest> {
                 }
             }
             return chunk.isEmpty()
-                    || stager.stageChunk(located, chunk, clock.instant()).isPresent();
+                    || stager.stageChunk(located, cursor, chunk, clock.instant())
+                            .isPresent();
         } catch (JsonProcessingException unreadable) {
             // Jackson's message can quote the row's text; keep only where it broke.
             throw new IllegalStateException(rowStream(located, cursor) + " has an unreadable row: "

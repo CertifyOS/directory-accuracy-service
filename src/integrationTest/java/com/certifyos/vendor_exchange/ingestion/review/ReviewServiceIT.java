@@ -407,6 +407,23 @@ class ReviewServiceIT {
     }
 
     @Test
+    void aRepeatedRejectIsRefusedAndRemembersTheValueOnce() {
+        FieldRecommendation doc = stage(14, "cert-000777", "loc-7781", "phone");
+        DecisionRequest reject = new DecisionRequest(doc.id(), Action.REJECT, "old number still active", 1L);
+        service.decide(TENANT, reject, REVIEWER);
+
+        ProblemException refused =
+                Assertions.assertThrows(ProblemException.class, () -> service.decide(TENANT, reject, REVIEWER));
+
+        Assertions.assertEquals(409, refused.status());
+        Assertions.assertEquals("DECISION_CONFLICT", refused.code());
+        List<RejectedValue> remembered = rejectedValues.forPractitioner(TENANT, "cert-000777", 10);
+        Assertions.assertEquals(1, remembered.size());
+        Assertions.assertEquals(1L, remembered.get(0).rejectionCount(), "the retry did not count again");
+        Assertions.assertEquals(1, remembered.get(0).rejections().size());
+    }
+
+    @Test
     void rejectRollsBackWhenTheMemoryWriteFails() {
         FieldRecommendation doc = stage(13, "cert-rb1", "loc-1", "phone");
         Mockito.doThrow(new IllegalStateException("memory down"))

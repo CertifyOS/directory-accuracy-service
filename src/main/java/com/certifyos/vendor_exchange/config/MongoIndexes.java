@@ -155,6 +155,22 @@ public class MongoIndexes {
                         new IndexOptions()
                                 .name("field_recs_open_list_any_field")
                                 .partialFilterExpression(openStates));
+        // the list of decided rows (approved, rejected, in or after release): the review API takes any
+        // status, and the open-state indexes above cannot serve these
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "reviewStatus", "stagedAt", "_id"),
+                        new IndexOptions()
+                                .name("field_recs_decided_list")
+                                .partialFilterExpression(Filters.in(
+                                        "reviewStatus",
+                                        "APPROVED",
+                                        "REJECTED",
+                                        "RELEASE_REQUESTED",
+                                        "RELEASING",
+                                        "RELEASED",
+                                        "RELEASE_FAILED")));
 
         // the release read-back's location lookup: only RELEASING fields, a handful at any time
         collections
@@ -183,6 +199,12 @@ public class MongoIndexes {
                 .createIndex(
                         Indexes.ascending("resolution.kind", "receivedAt"),
                         new IndexOptions().name("unmatched_resolution"));
+        // The operator list: one folder tenant's open rows (resolution.kind null) oldest first.
+        collections
+                .unmatchedUploads()
+                .createIndex(
+                        Indexes.ascending("folderTenant", "resolution.kind", "receivedAt", "_id"),
+                        new IndexOptions().name("unmatched_open_by_tenant"));
 
         // vendor_review_events
         collections

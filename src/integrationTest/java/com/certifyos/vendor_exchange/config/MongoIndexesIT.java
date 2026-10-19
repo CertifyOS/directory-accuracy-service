@@ -164,6 +164,26 @@ public class MongoIndexesIT {
         Assertions.assertEquals(
                 openStates,
                 recommendations.get("field_recs_open_list_any_field").get("partialFilterExpression", Document.class));
+        assertKey(
+                recommendations,
+                "field_recs_decided_list",
+                new Document("tenantId", 1)
+                        .append("reviewStatus", 1)
+                        .append("stagedAt", 1)
+                        .append("_id", 1));
+        Assertions.assertEquals(
+                new Document(
+                        "reviewStatus",
+                        new Document(
+                                "$in",
+                                List.of(
+                                        "APPROVED",
+                                        "REJECTED",
+                                        "RELEASE_REQUESTED",
+                                        "RELEASING",
+                                        "RELEASED",
+                                        "RELEASE_FAILED"))),
+                recommendations.get("field_recs_decided_list").get("partialFilterExpression", Document.class));
 
         Map<String, Document> rejected = byName(collections.rejectedValues());
         assertKey(rejected, "rejected_values_ttl", new Document("expiresAt", 1));
@@ -173,10 +193,15 @@ public class MongoIndexesIT {
                 "rejected_values_practitioner",
                 new Document("tenantId", 1).append("certifyPractitionerId", 1));
 
+        Map<String, Document> unmatched = byName(collections.unmatchedUploads());
+        assertKey(unmatched, "unmatched_resolution", new Document("resolution.kind", 1).append("receivedAt", 1));
         assertKey(
-                byName(collections.unmatchedUploads()),
-                "unmatched_resolution",
-                new Document("resolution.kind", 1).append("receivedAt", 1));
+                unmatched,
+                "unmatched_open_by_tenant",
+                new Document("folderTenant", 1)
+                        .append("resolution.kind", 1)
+                        .append("receivedAt", 1)
+                        .append("_id", 1));
 
         Map<String, Document> reviewEvents = byName(collections.reviewEvents());
         assertKey(reviewEvents, "review_events_by_field", new Document("fieldRecommendationId", 1).append("_id", 1));

@@ -101,8 +101,16 @@ public class RejectedValueRepository {
         return new Upserted(id, count == null ? 0 : count);
     }
 
-    /** {@code now} plus whole calendar months, in UTC; {@code Instant.plus} has no month unit. */
+    /**
+     * {@code now} plus whole calendar months, in UTC; {@code Instant.plus} has no month unit. A
+     * setting below one month is refused: it would put {@code expiresAt} at or before now, and the TTL
+     * monitor would delete the row on its next pass without any error.
+     */
     static Instant expiry(Instant now, int ttlMonths) {
+        if (ttlMonths < 1) {
+            throw new IllegalArgumentException(
+                    "vendor-exchange.ingestion.rejected-value-ttl-months must be at least 1, got " + ttlMonths);
+        }
         return now.atZone(ZoneOffset.UTC).plusMonths(ttlMonths).toInstant();
     }
 

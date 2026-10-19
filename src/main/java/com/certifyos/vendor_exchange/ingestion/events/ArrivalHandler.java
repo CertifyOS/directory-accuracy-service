@@ -23,7 +23,9 @@ import org.jboss.logging.Logger;
 /**
  * The arrival handler table (design steps 1 and 2): a storage notification for the vendor bucket,
  * read from the message attributes only. Every outcome but an unexpected exception acknowledges;
- * an exception before the claim commits reaches the 500 mapper and Pub/Sub redelivers. The claim is
+ * an exception before the claim commits reaches the 500 mapper and Pub/Sub redelivers. While the
+ * service is switched off every delivery answers 503 {@code SERVICE_DISABLED} with nothing written,
+ * so the message waits for redelivery instead of being acknowledged. The claim is
  * one transaction ({@link InboundLifecycle#received}); the enqueue follows its commit, and the job id
  * is recorded in a second small transaction after the enqueue. A crash between the commit and the
  * enqueue leaves a {@code RECEIVED} entry with no job, which the redelivered event finds and enqueues.
@@ -37,6 +39,9 @@ public class ArrivalHandler {
 
     /** The one completeness signal this handler implements. */
     public static final String DATA_FILE = "DATA_FILE";
+
+    /** The problem code a delivery gets while the service is switched off: 503, so Pub/Sub redelivers. */
+    public static final String SERVICE_DISABLED = "SERVICE_DISABLED";
 
     /** The event type tag for a message whose object identity could not be read. */
     static final String UNREADABLE = "UNREADABLE";
@@ -86,9 +91,7 @@ public class ArrivalHandler {
         /** The batch's first upload, claimed and handed to the request-ingestion job. */
         RECEIVED,
         /** A later upload for the batch, recorded and never processed. */
-        DUPLICATE_LOGGED,
-        /** The service is switched off; acknowledged with nothing written. */
-        DISABLED
+        DUPLICATE_LOGGED
     }
 
     /**
@@ -100,8 +103,10 @@ public class ArrivalHandler {
     public Outcome handle(PubSubPushMessage.Message message) {
         String messageId = message.messageId();
         if (!cfg.enabled()) {
-            LOG.infof("arrival %s acknowledged, the service is disabled", messageId);
-            return Outcome.DISABLED;
+            // Never acknowledge an upload while switched off: Pub/Sub redelivers (or dead-letters)
+            // the message, so no upload is acknowledged and forgotten, as the ingestion jobs throw.
+            LOG.infof("arrival %s refused for redelivery, the service is disabled", messageId);
+            throw ProblemException.unavailable(SERVICE_DISABLED, "the service is disabled; redeliver later");
         }
         Optional<ArrivalEvent> read = ArrivalEvent.fromAttributes(message.attributes());
         if (read.isEmpty()) {
