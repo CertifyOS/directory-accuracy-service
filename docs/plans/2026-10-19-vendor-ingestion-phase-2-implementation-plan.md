@@ -372,7 +372,7 @@ public class IngestionDeadlineCheckJob implements JobRequestHandler<IngestionDea
 
 ### Gate 1
 
-- [ ] CI green. Finding 97, "CP-40437 Step 1": entry-level `attempt` and retry edges; `ARCHIVING` before the copy; `FILE_INGESTION_REFUSED`; the read timeout; what the deadline job leaves to Step 3.
+- [ ] CI green. Finding 100, "CP-39606 Step 1" (97 to 99 hold the implementers' shape decisions): entry-level `attempt` and retry edges; `ARCHIVING` before the copy; `FILE_INGESTION_REFUSED`; the read timeout; what the deadline job leaves to Step 3.
 - [ ] Merge; next branch from `main`.
 
 ---
@@ -401,7 +401,7 @@ public record UnmatchedUpload(String id /* uploadId */, String folderTenant, Inb
 
 **Files:**
 - Create: `ingestion/events/ArrivalHandler.java`, `ArrivalResource.java`
-- Modify: `ingestion/inbound/InboundLifecycle.java` (`unmatched`)
+- Create: `ingestion/inbound/UnmatchedOperations.java` (`unmatched(...)`; one transaction, built on `InboundLifecycle.envelope`; `InboundLifecycle` itself is not modified after Step 1)
 - Test: `src/integrationTest/.../ingestion/events/ArrivalHandlerIT.java`, `ArrivalResourceIT.java`
 
 **Interfaces:**
@@ -411,16 +411,16 @@ public record UnmatchedUpload(String id /* uploadId */, String folderTenant, Inb
   public Outcome handle(PubSubPushMessage.Message message); }
 @Path("/internal/vendor-ingestion/arrivals") @PubSubPush @Tag(name = "internal") public class ArrivalResource { @POST @Operation(...) public Response receive(PubSubPushMessage envelope); } // 204 on every outcome
 ```
-Table, in order: attributes unreadable → log, 204 (no metric name exists for it; counted under `arrivalIgnoredEventType("UNREADABLE")`); `eventType != OBJECT_FINALIZE` → `IGNORED_EVENT_TYPE`, metric; `objectId` not under `to/` → `IGNORED_PREFIX`; `InboundNames.parse` empty → unmatched `UNPARSEABLE_NAME`; batch by `exportBatchRef` not found → `UNKNOWN_BATCH`; folder tenant, file tenant, batch tenant disagree → `TENANT_MISMATCH`; batch state not `DELIVERED|SUPERSEDED` or `file == null` → `BATCH_NOT_DELIVERED`; else `lifecycle.received(batch, entry, now)`; on `RECEIVED` → `enqueuer.requestIngestion(batch.id(), uploadId, 1)` after the commit, then `updateInState(RECEIVED)` writing `jobId` (a second small transaction, as the export tick records its job id); on `ALREADY_CLAIMED` with the entry `RECEIVED` and no `jobId` → enqueue now (design: "redelivery after a crash between commit and enqueue"). Unmatched is one transaction in `InboundLifecycle.unmatched(UnmatchedUpload, Instant)`: `insertIfAbsent` and `INBOUND_FILE_UNMATCHED` (service scope, actor `INGESTION`, `upload(uploadId)`), metric `arrivalUnmatched(folderTenant or "unknown", reason)`. A `SUPERSEDED` batch is matched (design: "the echo binds the file to the cycle that asked"). Only `completenessSignal = DATA_FILE` is built; the constructor refuses any other value with `IllegalStateException`, so a `MANIFEST` deployment fails at boot instead of claiming the wrong object.
+Table, in order: attributes unreadable → log, 204 (no metric name exists for it; counted under `arrivalIgnoredEventType("UNREADABLE")`); `eventType != OBJECT_FINALIZE` → `IGNORED_EVENT_TYPE`, metric; `objectId` not under `to/` → `IGNORED_PREFIX`; `InboundNames.parse` empty → unmatched `UNPARSEABLE_NAME`; batch by `exportBatchRef` not found → `UNKNOWN_BATCH`; folder tenant, file tenant, batch tenant disagree → `TENANT_MISMATCH`; batch state not `DELIVERED|SUPERSEDED` or `file == null` → `BATCH_NOT_DELIVERED`; else `lifecycle.received(batch, entry, now)`; on `RECEIVED` → `enqueuer.requestIngestion(batch.id(), uploadId, 1)` after the commit, then `InboundLifecycle.jobRecorded(located, jobId, now)` (a second small transaction, as the export tick records its job id); on `ALREADY_CLAIMED` with the entry `RECEIVED` and no `jobId` → enqueue now (design: "redelivery after a crash between commit and enqueue"). Unmatched is one transaction in `UnmatchedOperations.unmatched(UnmatchedUpload, Instant)`: `insertIfAbsent` and `INBOUND_FILE_UNMATCHED` (service scope, actor `INGESTION`, `upload(uploadId)`), metric `arrivalUnmatched(folderTenant or "unknown", reason)`. A `SUPERSEDED` batch is matched (design: "the echo binds the file to the cycle that asked"). Only `completenessSignal = DATA_FILE` is built; the constructor refuses any other value with `IllegalStateException`, so a `MANIFEST` deployment fails at boot instead of claiming the wrong object.
 
-- [ ] **Step 1: Write the failing ITs**. `ArrivalHandlerIT` (api profile): `finalizeUnderToClaimsAndEnqueues` (entry `RECEIVED` with `jobId`; job `ENQUEUED` under `JobIds.of("request-ingestion", uploadId, 1)`; `acknowledgedAt` set; metric `arrivals.received` 1); `secondGenerationIsDuplicateLogged` (no job; `INBOUND_FILE_DUPLICATE_LOGGED` with `firstUploadId`); `redeliveryOfClaimedEventIsNoOp`; `redeliveryOfReceivedWithoutJobEnqueues`; `fromPrefixIsIgnored`; `deleteEventIsIgnored`; `badNameIsUnmatched`; `unknownBatchIsUnmatched`; `tenantMismatchIsUnmatched` (folder `to/org-b/`, file named `org-a`); `batchNotDeliveredIsUnmatched`; `supersededBatchIsMatched`; `disabledServiceAcknowledgesWithoutWriting`. `ArrivalResourceIT`: `verifiedPushIs204`, `missingTokenIs401Problem`, `rejectedTokenIs401Problem`, `envelopeWithoutAttributesIs204`.
+- [ ] **Step 1: Write the failing ITs**. `ArrivalHandlerIT` (api profile): `finalizeUnderToClaimsAndEnqueues` (entry `RECEIVED` with `jobId`; job `ENQUEUED` under `JobIds.of("request-ingestion", uploadId, 1)`; `acknowledgedAt` set; metric `arrivals.received` 1); `secondGenerationIsDuplicateLogged` (no job; `INBOUND_FILE_DUPLICATE_LOGGED` with `firstUploadId`); `redeliveryOfClaimedEventIsNoOp`; `redeliveryOfReceivedWithoutJobEnqueues`; `fromPrefixIsIgnored`; `deleteEventIsIgnored`; `badNameIsUnmatched`; `unknownBatchIsUnmatched`; `tenantMismatchIsUnmatched` (folder `to/org-b/`, file named `org-a`); `batchNotDeliveredIsUnmatched`; `supersededBatchIsMatched`; `disabledServiceAcknowledgesWithoutWriting`; `concurrentArrivalsAcknowledgeOnce` (two handler calls for the same event on two threads: one entry, one `EXPORT_BATCH_ACKNOWLEDGED`, one batch `version` bump, both outcomes acknowledged; Review Focus 1 at handler level). `ArrivalResourceIT`: `verifiedPushIs204`, `missingTokenIs401Problem`, `rejectedTokenIs401Problem`, `envelopeWithoutAttributesIs204`.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** Handler constructor (7): `ExportBatchRepository`, `InboundFileRepository`, `InboundLifecycle`, `UnmatchedUploadRepository`, `IngestionJobEnqueuer`, `VendorExchangeConfig`, `Clock`. **Step 4: Run** → PASS; `make openapi`. **Step 5: Commit** `feat(ingestion): arrival handler claims the first upload, logs the rest, records unmatched files`.
 
 ### Task 2.3: Operator reads and unmatched resolution
 
 **Files:**
 - Create: `ingestion/api/VendorIngestionOpsResource.java`, `ingestion/api/InboundViews.java`, `ingestion/api/Page.java`
-- Modify: `ingestion/inbound/InboundLifecycle.java` (`attach`, `discard`)
+- Modify: `ingestion/inbound/UnmatchedOperations.java` (`attach`, `discard`; `attach` runs `InboundLifecycle.claimIn(session, batch, entry, operatorEmail, now)`, the row resolution and `INBOUND_UPLOAD_ATTACHED` in one transaction)
 - Test: `src/integrationTest/.../ingestion/api/VendorIngestionOpsResourceIT.java`
 
 **Interfaces:**
@@ -435,7 +435,7 @@ Table, in order: attributes unreadable → log, 204 (no metric name exists for i
 
 ### Gate 2
 
-- [ ] CI green; oasdiff accepts five new paths. Finding 98, "CP-40437 Step 2": the table as built, `SUPERSEDED` matched, the two-transaction job id write, `DATA_FILE` only.
+- [ ] CI green; oasdiff accepts five new paths. Finding 101, "CP-39606 Step 2": the table as built, `SUPERSEDED` matched, the two-transaction job id write, `DATA_FILE` only.
 - [ ] Merge.
 
 ---
@@ -535,7 +535,8 @@ Rules, in order per row, all local (design step 5): `!schemaValid` → `SCHEMA_I
 
 **Files:**
 - Create: `ingestion/staging/RowStager.java`, `ingestion/jobs/StageRowsJob.java`, `StageRowsJobRequest.java`
-- Modify: `ingestion/jobs/IngestionJobEnqueuer.java` (`stageRows`), `ingestion/inbound/InboundLifecycle.java` (`staging`, `chunkCheckpoint`, `staged`)
+- Modify: `ingestion/jobs/IngestionJobEnqueuer.java` (`stageRows`)
+- Create: `ingestion/staging/StagingLifecycle.java` (`staging`, `chunkCheckpoint`, `staged`; one transaction per method on `InboundFileRepository`, using the public `InboundFile` nested `toDocument` helpers, `InboundLifecycle.envelope` and `InboundLifecycle.truncate`)
 - Test: `src/integrationTest/.../ingestion/jobs/StageRowsJobIT.java`
 
 **Interfaces:**
@@ -545,15 +546,15 @@ Rules, in order per row, all local (design step 5): `!schemaValid` → `SCHEMA_I
   public Progress stageChunk(Located l, List<FileIngestionRow> chunk, Instant now); }  // build; upsertAll; settle; lifecycle.chunkCheckpoint(l, progress); metrics stageRows per disposition, stageDocuments, stageChunkDuration
 public record StageRowsJobRequest(String exportBatchId, String uploadId, int attempt) implements InboundJobRequest {}
 public class StageRowsJob implements JobRequestHandler<StageRowsJobRequest> { public static final String NAME = "stage-rows"; }
-// InboundLifecycle additions
+// StagingLifecycle (ingestion/staging), one transaction per method
 public boolean staging(Located l, Instant now);                       // PARSED→STAGING; no event
 public void chunkCheckpoint(Located l, RowStager.Progress p, Instant now);  // updateInState(STAGING): $inc dispositions.<d>, written.*, checkpoint.chunks; $set checkpoint.after; no event
 public void staged(Located l, long durationMs, Instant now);          // STAGING→STAGED; stagedAt; INBOUND_FILE_STAGED(dispositions, written, chunks, durationMs, practitionerFieldDisagreements)
 ```
-`StageRowsJob.run`: `loadExpecting({PARSED, STAGING})`; from `PARSED` call `lifecycle.staging`; open `FileIngestionClient.rows(tenant, identifier, ingestionId, entry.checkpoint().after())`, read `FileIngestionRow` values with `ObjectMapper.readerFor(FileIngestionRow.class).readValues(stream)`, collect `stageChunkRows` rows, `stager.stageChunk`, repeat; end of stream: `sum(dispositions)` against `parse.populatedRows` → mismatch `lifecycle.failed(l, STAGING, "STAGE", "COUNT_MISMATCH", "<sum> vs <populated>", attempts)`; else `lifecycle.staged`, then `markConsumed` best effort (one warning on failure). A 429 propagates (JobRunr retry, metric `stageStream429`); a 404 or 410 on the rows → `failed(…, "ROWS_EXPIRED", …)`.
+`StageRowsJob.run`: `loadExpecting({PARSED, STAGING})`; from `PARSED` call `stagingLifecycle.staging`; open `FileIngestionClient.rows(tenant, identifier, ingestionId, entry.checkpoint().after())`, read `FileIngestionRow` values with `ObjectMapper.readerFor(FileIngestionRow.class).readValues(stream)`, collect `stageChunkRows` rows, `stager.stageChunk`, repeat; end of stream: `sum(dispositions)` against `parse.populatedRows` → mismatch `lifecycle.failed(l, STAGING, "STAGE", "COUNT_MISMATCH", "<sum> vs <populated>", attempts)`; else `stagingLifecycle.staged`, then `markConsumed` best effort (one warning on failure). A 429 propagates (JobRunr retry, metric `stageStream429`); a 404 or 410 on the rows → `failed(…, "ROWS_EXPIRED", …)`.
 
 - [ ] **Step 1: Write the failing IT** (api profile, run directly, WireMock file-ingestion serving NDJSON): `stagesTheDesignFile` (five rows for two practitioners, one with two locations; entry `STAGED`; `dispositions {STAGED: 5}`; `written.confirmedFields` and `unverifiedFields` as counted; the sample document present `PENDING`; `INBOUND_FILE_STAGED` carries the counts; mark-consumed called once); `chunksAndCheckpoints` (two 2-row chunks through `RowStager` directly: `checkpoint.after` is `Physicians Directory Accuracy:2` then `:4`, counts accumulate, `chunks` 2); `retryAfterCrashBeforeCheckpointDoesNotDoubleCount` (stream dropped after row 3 inside chunk 2: job throws, entry `STAGING`, checkpoint after row 2; second run resumes with `after=…:2`, document count unchanged, dispositions sum to 5); `blankLocationIdStagesPractitionerFieldsOnly`; `secondUploadOfSameRowsIsDuplicate` (stage twice: `DUPLICATE` 5 on the second entry); `countMismatchFailsTheEntry`; `rowsExpiredFailsTheEntry`; `tooManyStreamsPropagates`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** `StageRowsJob` constructor (6): `InboundJobSupport`, `InboundLifecycle`, `RowStager`, `@RestClient FileIngestionClient`, `ObjectMapper`, `Clock`. **Step 4: Run** → PASS. **Step 5: Commit** `feat(ingestion): stage-rows job streams file-ingestion rows into idempotent chunks with a checkpoint`.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** `StageRowsJob` constructor (7): `InboundJobSupport`, `InboundLifecycle`, `StagingLifecycle`, `RowStager`, `@RestClient FileIngestionClient`, `ObjectMapper`, `Clock`. **Step 4: Run** → PASS. **Step 5: Commit** `feat(ingestion): stage-rows job streams file-ingestion rows into idempotent chunks with a checkpoint`.
 
 ### Task 3.5: Deadline check enqueues staging
 
@@ -566,7 +567,7 @@ public void staged(Located l, long durationMs, Instant now);          // STAGING
 
 ### Gate 3
 
-- [ ] CI green. Finding 99, "CP-40437 Step 3": D11 as built (counts, not collections), P5, the `DUPLICATE` rule through `BulkWriteResult.getUpserts()`, the evidence parse fallback, what a disagreement logs.
+- [ ] CI green. Finding 102, "CP-39606 Step 3": D11 as built (counts, not collections), P5, the `DUPLICATE` rule through `BulkWriteResult.getUpserts()`, the evidence parse fallback, what a disagreement logs.
 - [ ] Merge.
 
 ---
@@ -589,15 +590,16 @@ Branch `feature/CP-40437-step-4-completion`. Design step 4 by event, plus the tw
   public Outcome handle(PubSubPushMessage.Message message); }
 @Path("/internal/vendor-ingestion/completions") @PubSubPush public class CompletionResource { @POST public Response receive(PubSubPushMessage envelope); }
 ```
-Table: body (base64 `data`) unparseable → log, 204; `externalRef` null or `findByExternalRef` empty → `UNKNOWN_REF`, 204; `event.tenantId != batch.tenantId` → `REJECTED_TENANT_MISMATCH`; entry not `INGESTION_REQUESTED` → `STATE_PASSED`; `COMPLETED|PARTIAL` → `lifecycle.parsed(l, counts, status, "EVENT")`, delete the deadline job (`entry.jobId()`), `enqueuer.stageRows(...)` and store that job id with `updateInState(PARSED)`; `INVALID` → `lifecycle.ingestionFailed(l, reason, "EVENT")`, delete the deadline job; any other status → `IGNORED_STATUS`.
+Table: body (base64 `data`) unparseable → log, 204; `externalRef` null or `findByExternalRef` empty → `UNKNOWN_REF`, 204; `event.tenantId != batch.tenantId` → `REJECTED_TENANT_MISMATCH`; entry still `ARCHIVING` (the request job has not committed `INGESTION_REQUESTED`) → throw so the resource answers 5xx and Pub/Sub redelivers (`ARCHIVING_NOT_COMMITTED`); entry in any other state than `INGESTION_REQUESTED` → `STATE_PASSED`; `COMPLETED|PARTIAL` (the only statuses passed to `parsed`) → `lifecycle.parsed(l, counts, status, "EVENT")`, delete the deadline job (`entry.jobId()`), `enqueuer.stageRows(...)` and store that job id with `updateInState(PARSED)`; `INVALID` → `lifecycle.ingestionFailed(l, reason, "EVENT")`, delete the deadline job; any other status → `IGNORED_STATUS`.
 
-- [ ] **Step 1: Write the failing ITs**: `CompletionHandlerIT`: `completedParsesEnqueuesAndDeletesDeadline`; `partialIsParsed`; `invalidFailsIngestion` (`INGESTION_FAILED`, `parse.reason STRUCTURE_REJECTED`, metric `completion.status{INVALID}`); `unknownRefIsAcknowledged`; `tenantMismatchIsRejected`; `duplicateEventIsNoOp` (one event); `unparseableIsAcknowledged`. `CompletionResourceIT`: the three token cases and 204.
+- [ ] **Step 1: Write the failing ITs**: `CompletionHandlerIT`: `completedParsesEnqueuesAndDeletesDeadline`; `partialIsParsed`; `invalidFailsIngestion` (`INGESTION_FAILED`, `parse.reason STRUCTURE_REJECTED`, metric `completion.status{INVALID}`); `unknownRefIsAcknowledged`; `tenantMismatchIsRejected`; `duplicateEventIsNoOp` (one event); `archivingEntryIsRetried` (entry `ARCHIVING` with the external ref already written: the resource answers 5xx, nothing changes); `unparseableIsAcknowledged`. `CompletionResourceIT`: the three token cases and 204.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS; `make openapi`. **Step 5: Commit** `feat(ingestion): completion handler moves a parsed file to staging`.
 
 ### Task 4.2: `InboundReconcilerJob`, `IngestionFinalFailureFilter`
 
 **Files:**
 - Create: `ingestion/jobs/InboundReconcilerJob.java`, `IngestionFinalFailureFilter.java`, `IngestionFinalFailureFilterRegistration.java`
+- Modify: `ingestion/inbound/InboundFile.java` (`reconciliations` counter, default 0), `ingestion/inbound/InboundFileRepository.java` (`reconciled(session, batchId, uploadId, now)`: `$inc reconciliations`, `$set updatedAt`)
 - Test: `src/test/.../ingestion/jobs/InboundReconcilerJobTest.java`; `src/integrationTest/.../ingestion/jobs/InboundReconcilerJobIT.java`, `IngestionJobRunrGateIT.java`
 
 **Interfaces:**
@@ -606,14 +608,14 @@ Table: body (base64 `data`) unparseable → log, 204; `externalRef` null or `fin
   @Recurring(id = RECURRING_ID, cron = CRON, zoneId = "UTC") public void reconcile(); public List<Reenqueued> run(); public record Reenqueued(String uploadId, InboundFileState state, String job, UUID jobId) {} }
 public class IngestionFinalFailureFilter implements ApplyStateFilter {}  // inbound jobs → entry FAILED; ReleaseJob (Step 7) → fields RELEASE_FAILED reason EXHAUSTED
 ```
-`run`: `findStale(reconcilable(), now - inboundStaleMinutes, 500)`; `RECEIVED|ARCHIVING` → `requestIngestion`, `PARSED|STAGING` → `stageRows`, each under the entry's attempt (a deterministic id that already exists is not enqueued twice); writes `INBOUND_FILE_RECONCILED(state, ageMinutes, action RE_ENQUEUED)` as a standalone fact and one warning line `INGESTION_RECONCILER_REENQUEUED batch=… upload=… state=… since=… job=… jobId=…`. `INGESTION_REQUESTED` is never touched (the deadline job owns it). The filter mirrors `BatchFinalFailureFilter`: on `FAILED` after JobRunr's retry filter, read the `InboundJobRequest`, `lifecycle.failed(l, state, <step by job>, reason, "<type>: <message>", attempts)` unless terminal, where `reason` is `SOURCE_UNREADABLE` when the last exception was a register 4xx and `JOB_RETRIES_EXHAUSTED` otherwise; metrics `ingestionJobRetry`, `ingestionJobFinalFailure`. Registration observes `StartupEvent` and calls `setJobFilters(List.of(filter))` (appends, P6).
+`run`: `findStale(reconcilable(), now - inboundStaleMinutes, 500)`; `RECEIVED|ARCHIVING` → `requestIngestion`, `PARSED|STAGING` → `stageRows`, each under `JobIds.of(<job name>, uploadId + ":reconciled:" + n, attempt)` where `n` is the entry's `reconciliations` counter, incremented in the same write as the `INBOUND_FILE_RECONCILED` event, so an earlier job id in `FAILED` never blocks the re-enqueue; writes `INBOUND_FILE_RECONCILED(state, ageMinutes, action RE_ENQUEUED)` as a standalone fact and one warning line `INGESTION_RECONCILER_REENQUEUED batch=… upload=… state=… since=… job=… jobId=…`. `INGESTION_REQUESTED` entries are left to the deadline job while `deadlineAt` is in the future; one whose `deadlineAt` is more than `inboundStaleMinutes` in the past (the scheduled check was lost) is re-enqueued as `IngestionDeadlineCheckJob` under `JobIds.of(IngestionDeadlineCheckJob.NAME, uploadId + ":reconciled:" + n, attempt)` and written as `INBOUND_FILE_RECONCILED` with action `RE_ENQUEUED`. The filter mirrors `BatchFinalFailureFilter`: on `FAILED` after JobRunr's retry filter, read the `InboundJobRequest`, `lifecycle.failed(l, state, <step by job>, reason, "<type>: <message>", attempts)` unless terminal, and never for an `IngestionDeadlineCheckJob` whose entry is still `ARCHIVING` (the request job may still commit; the reconciler's deadline rule covers a lost check), where `reason` is `SOURCE_UNREADABLE` when the last exception was a register 4xx and `JOB_RETRIES_EXHAUSTED` otherwise; metrics `ingestionJobRetry`, `ingestionJobFinalFailure`. Registration observes `StartupEvent` and calls `setJobFilters(List.of(filter))` (appends, P6).
 
-- [ ] **Step 1: Write the failing tests**: `InboundReconcilerJobTest.prefixAndCronArePinned`; `InboundReconcilerJobIT.staleEntriesAreReenqueuedByState` (RECEIVED, ARCHIVING, PARSED, STAGING entries 31 minutes old plus one INGESTION_REQUESTED: four jobs under deterministic ids, the fifth untouched, four `INBOUND_FILE_RECONCILED`); `IngestionJobRunrGateIT` (worker profile, retries 1): a `RequestIngestionJob` whose archive store always throws reaches `FAILED` and the entry reads `FAILED` with `JOB_RETRIES_EXHAUSTED` and `INBOUND_FILE_FAILED` within 60 s.
+- [ ] **Step 1: Write the failing tests**: `InboundReconcilerJobTest.prefixAndCronArePinned`; `InboundReconcilerJobIT.staleEntriesAreReenqueuedByState` (RECEIVED, ARCHIVING, PARSED, STAGING entries 31 minutes old plus one INGESTION_REQUESTED with a future `deadlineAt` and one with `deadlineAt` 31 minutes past: five jobs under deterministic ids, the future-deadline entry untouched, five `INBOUND_FILE_RECONCILED`); `IngestionJobRunrGateIT` (worker profile, retries 1): a `RequestIngestionJob` whose archive store always throws reaches `FAILED` and the entry reads `FAILED` with `JOB_RETRIES_EXHAUSTED` and `INBOUND_FILE_FAILED` within 60 s.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS; `WorkerRoleBootIT` sees both recurring jobs. **Step 5: Commit** `feat(ingestion): inbound reconciler every ten minutes and the final-failure filter`.
 
 ### Gate 4
 
-- [ ] CI green. Finding 100, "CP-40437 Step 4". Merge.
+- [ ] CI green. Finding 103, "CP-39606 Step 4". Merge.
 
 ---
 
@@ -663,7 +665,7 @@ Rules: `version` required (400 `VERSION_REQUIRED`); `REJECT` needs a non-blank c
 
 ### Gate 5
 
-- [ ] CI green; oasdiff accepts eight paths. Finding 101, "CP-40437 Step 5": P1; the 409 `detail` shape; the 10-row floor; the field trail endpoint. Merge.
+- [ ] CI green; oasdiff accepts eight paths. Finding 104, "CP-39607 Step 5": P1; the 409 `detail` shape; the 10-row floor; the field trail endpoint. Merge.
 
 ---
 
@@ -706,7 +708,7 @@ public record RejectedValue(String id, String tenantId, String certifyPractition
 
 ### Gate 6
 
-- [ ] CI green; `MongoIndexesIT` shows the one TTL index. Finding 102, "CP-40437 Step 6". Merge.
+- [ ] CI green; `MongoIndexesIT` shows the one TTL index. Finding 105, "CP-39607 Step 6". Merge.
 
 ---
 
@@ -821,7 +823,7 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> { public
 ### Gate 7
 
 - [ ] CI green; oasdiff accepts five paths.
-- [ ] **Live verification before the finding (read-only, staging):** one `GET /practitioners/ov/{id}` and one `GET /locations/ov/{id}` to pin the `contributionMap` key shape and the `contacts[]` shape (P9, ask 17); one `GET /core/entity-addresses/entity/{entityId}/crosswalk-id` to confirm `Crosswalks.location` against a real crosswalk; `GET /tenants/{t}/configurations` to confirm the `sourceRanking` rule shape (P8). Record each with the request and the relevant response keys (no values) in finding 103, "CP-40437 Step 7", with P9, P12, P13 and the `DalOperation` body shape as accepted by `TransactionalBatchService`.
+- [ ] **Live verification before the finding (read-only, staging):** one `GET /practitioners/ov/{id}` and one `GET /locations/ov/{id}` to pin the `contributionMap` key shape and the `contacts[]` shape (P9, ask 17); one `GET /core/entity-addresses/entity/{entityId}/crosswalk-id` to confirm `Crosswalks.location` against a real crosswalk; `GET /tenants/{t}/configurations` to confirm the `sourceRanking` rule shape (P8). Record each with the request and the relevant response keys (no values) in finding 106, "CP-39607 Step 7", with P9, P12, P13 and the `DalOperation` body shape as accepted by `TransactionalBatchService`.
 - [ ] Merge.
 
 ---
@@ -834,10 +836,10 @@ Branch `feature/CP-40437-step-8-in-place`. Design step 8, D22: `accepting_new_pa
 
 **Files:**
 - Create: `src/integrationTest/resources/fixtures/api-layer/group-practitioner-locations.json`, `tenant-specialties.json` (captured shapes, ids replaced by `cert-…`, `tgl-…` placeholders, no names or addresses)
-- Modify: `docs/decisions.md` (finding 104, the pinned contracts)
+- Modify: `docs/decisions.md` (finding 107, the pinned contracts)
 
 - [ ] **Step 1: Read once, read-only, against staging:** `GET /practitioners/ov/{certifyPractitionerId}/group-practitioner-locations` (DAL) for a practitioner with two locations; `GET /tenant-specialties` (api-layer) for the tenant; the request records of `UpdatePractitionerLocationsRequest(tenantGroupId, locations[UpdatePractitionerLocationRequest(tenantGroupLocationId, …, networks[])])`, `CorrectLocationSpecialtyRequest(groupPractitionerLocationSpecialtyId, newTenantSpecialtyId)` and `LocationUpdateRequest(locationId, crosswalkId, entityAddressId, groupLocationId, tenantGroupLocationId, name, acceptNewPatients, …)` from the api-layer sources, noting which fields are required and which the UI sends for a one-field edit.
-- [ ] **Step 2: Write** the two fixtures and finding 104: for the echoed `certifyLocationId`, which row of the group-practitioner-locations response carries `tenantGroupLocationId`, `tenantGroupId`, `groupLocationId`, `locationId`, `entityAddressId` and the specialty link ids; how a vendor specialty string maps to a `tenantSpecialtyId` (exact name match, case-insensitive; no match → `SPECIALTY_UNRESOLVED`); which `acceptNewPatients` encoding the api-layer expects.
+- [ ] **Step 2: Write** the two fixtures and finding 107: for the echoed `certifyLocationId`, which row of the group-practitioner-locations response carries `tenantGroupLocationId`, `tenantGroupId`, `groupLocationId`, `locationId`, `entityAddressId` and the specialty link ids; how a vendor specialty string maps to a `tenantSpecialtyId` (exact name match, case-insensitive; no match → `SPECIALTY_UNRESOLVED`); which `acceptNewPatients` encoding the api-layer expects.
 - [ ] **Step 3: Commit** `docs(decisions): api-layer in-place contracts pinned for the release step`.
 
 ### Task 8.2: `ApiLayerClient` additions, `JunctionResolver`, `InPlaceWriter`
@@ -875,7 +877,7 @@ Field groups: `accepting_new_patients`, `pcp_at_location` → `PUT /practitioner
 
 ### Gate 8
 
-- [ ] CI green. Finding 105, "CP-40437 Step 8": the contracts as pinned, `completionSource DIRECT`, what a roster overwrite does to an in-place edit (design: expected). Merge.
+- [ ] CI green. Finding 108, "CP-39607 Step 8": the contracts as pinned, `completionSource DIRECT`, what a roster overwrite does to an in-place edit (design: expected). Merge.
 
 ---
 
@@ -895,7 +897,7 @@ Worker role, JobRunr executing every job, driven over HTTP like `ExportLaneIT`: 
 ### Task 9.2: Runbook, README, HANDOFF, AGENTS, OpenAPI, decisions, Jira
 
 **Files:**
-- Modify: `docs/runbook.md` (sections 4 and 5: the hook-ups and grants of asks 1 to 23; section 7: operator procedures for unmatched uploads, inbound files, review, release, rollback, each with the exact `curl` the lane test performs; section 8: failure rows from the design's edge-case table; section 10: alerts A1 to A16 with the `AUDIT` line or metric that evaluates each, in the E1 to E11 row format), `README.md` (layout: the `ingestion/` lane and its jobs), `HANDOFF.md` (end state, what the next subtask starts from, the design-doc edits), `AGENTS.md` (one line: `ingestion/` is `inbound/`, `events/`, `jobs/`, `staging/`, `review/`, `release/`, `api/`), `openapi/openapi.yaml` (final `make openapi`), `docs/decisions.md` (finding 106: Step 9 gate and the definition of done)
+- Modify: `docs/runbook.md` (sections 4 and 5: the hook-ups and grants of asks 1 to 23; section 7: operator procedures for unmatched uploads, inbound files, review, release, rollback, each with the exact `curl` the lane test performs; section 8: failure rows from the design's edge-case table; section 10: alerts A1 to A16 with the `AUDIT` line or metric that evaluates each, in the E1 to E11 row format), `README.md` (layout: the `ingestion/` lane and its jobs), `HANDOFF.md` (end state, what the next subtask starts from, the design-doc edits), `AGENTS.md` (one line: `ingestion/` is `inbound/`, `events/`, `jobs/`, `staging/`, `review/`, `release/`, `api/`), `openapi/openapi.yaml` (final `make openapi`), `docs/decisions.md` (finding 109: Step 9 gate and the definition of done)
 
 - [ ] **Step 1: Write the documentation** as listed.
 - [ ] **Step 2: Run** `make openapi && make lint && ./gradlew test` → clean; CI runs the suite.
@@ -908,7 +910,7 @@ The design names the instance groups `directory-accuracy-api` and `directory-acc
 
 ### Gate 9 and definition of done
 
-- [ ] Every gate 0 to 8 has a finding; `IngestionLaneIT`'s four scenarios pass in CI with their recorded event sequences in finding 106.
+- [ ] Every gate 0 to 8 has a finding; `IngestionLaneIT`'s four scenarios pass in CI with their recorded event sequences in finding 109.
 - [ ] Every endpoint of design steps 2, 4, 6 and 8 plus the operator reads is in `openapi/openapi.yaml` with problem+json responses; every new audit event type has its contract row copied from the design; every design metric is asserted after the lane.
 - [ ] No foundation package changed beyond Step 0's additions (recorded); `export/` has no dependency on `ingestion/` (ArchUnit).
 - [ ] A second engineer can follow runbook section 7 to attach an unmatched file, review a batch and release a field against the integration-test stack: by construction, since the section's calls are the ones `IngestionLaneIT` makes in the same order.
