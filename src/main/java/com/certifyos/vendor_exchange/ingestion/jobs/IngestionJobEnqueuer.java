@@ -124,6 +124,25 @@ public class IngestionJobEnqueuer {
         return JobIds.of(ReleaseJob.NAME, releaseId + ":wait:" + at.getEpochSecond(), 1);
     }
 
+    /**
+     * The id of a release job the release reconciler enqueues: one per second of the pass, so an earlier
+     * release job JobRunr holds in any state never turns the enqueue into a no-op.
+     *
+     * @param releaseId the release
+     * @param now the reconciler's pass time
+     * @return a stable UUID for that release and second
+     */
+    public static UUID releaseReconciledId(String releaseId, Instant now) {
+        return JobIds.of(ReleaseJob.NAME, releaseId + ":reconciled:" + now.getEpochSecond(), 1);
+    }
+
+    /** Enqueues a release's job for the release reconciler and returns its id. */
+    public UUID releaseReconciled(ReleaseJobRequest request, Instant now) {
+        UUID id = releaseReconciledId(request.releaseId(), now);
+        scheduler.enqueue(id, request);
+        return id;
+    }
+
     /** Schedules a release's job again at {@code at}, after a wait, and returns its id. */
     public UUID releaseAgain(ReleaseJobRequest request, Instant at) {
         UUID id = releaseWaitId(request.releaseId(), at);

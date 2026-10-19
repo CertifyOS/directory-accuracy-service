@@ -225,6 +225,10 @@ public class MongoIndexesIT {
         Assertions.assertEquals(
                 new Document("reviewStatus", "RELEASING"),
                 recommendations.get("field_recs_releasing_location").get("partialFilterExpression", Document.class));
+        assertKey(recommendations, "field_recs_release_requested", new Document("updatedAt", 1));
+        Assertions.assertEquals(
+                new Document("reviewStatus", "RELEASE_REQUESTED"),
+                recommendations.get("field_recs_release_requested").get("partialFilterExpression", Document.class));
     }
 
     private static void assertKey(Map<String, Document> found, String name, Document key) {

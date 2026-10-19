@@ -532,7 +532,8 @@ paths:
       description: "Pub/Sub push endpoint for mdm.slice.ov_generated. Requires the\
         \ subscription's OIDC identity token; reads the operational value back for\
         \ fields released through a candor slice and answers 204 to acknowledge every\
-        \ outcome, including an event that is not ours."
+        \ outcome, including an event that is not ours; answers 503 while the service\
+        \ is switched off so the message is redelivered."
       tags:
       - internal
       requestBody:
@@ -544,6 +545,13 @@ paths:
       responses:
         "204":
           description: Acknowledged
+        "503":
+          description: The service is switched off (SERVICE_DISABLED); Pub/Sub redelivers
+            the message
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
             \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"

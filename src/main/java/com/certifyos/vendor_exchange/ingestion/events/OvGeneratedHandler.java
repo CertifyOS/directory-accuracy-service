@@ -2,6 +2,7 @@ package com.certifyos.vendor_exchange.ingestion.events;
 
 import com.certifyos.vendor_exchange.config.VendorExchangeConfig;
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
+import com.certifyos.vendor_exchange.http.ProblemException;
 import com.certifyos.vendor_exchange.ingestion.release.ReadBackService;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldLevel;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
@@ -14,12 +15,16 @@ import org.jboss.logging.Logger;
 /**
  * The {@code mdm.slice.ov_generated} handler table (design step 8): survivorship wrote an operational
  * value; when our candor slice triggered the run, read it back and finish the entity's written {@code
- * RELEASING} fields. Every outcome acknowledges, but one: fields that are {@code RELEASING} with no
+ * RELEASING} fields. Every outcome acknowledges, but two: fields that are {@code RELEASING} with no
  * write recorded yet mean the event outran the release job's commit, so the handler throws and the 5xx
- * makes Pub/Sub redeliver. A read failure propagates the same way.
+ * makes Pub/Sub redeliver (after finishing the fields the run does cover); and a switched-off service
+ * answers 503 {@code SERVICE_DISABLED}. A read failure propagates the same way.
  */
 @ApplicationScoped
 public class OvGeneratedHandler {
+
+    /** The problem code a delivery gets while the service is switched off: 503, so Pub/Sub redelivers. */
+    public static final String SERVICE_DISABLED = "SERVICE_DISABLED";
 
     private static final Logger LOG = Logger.getLogger(OvGeneratedHandler.class);
 
@@ -55,9 +60,7 @@ public class OvGeneratedHandler {
         /** The entity's written fields are {@code RELEASED} with their verdicts. */
         RELEASED,
         /** The run did not include any of the entity's written fields (an earlier or another write). */
-        NOT_COVERED,
-        /** The service is switched off; acknowledged with nothing written (the deadline reads later). */
-        DISABLED
+        NOT_COVERED
     }
 
     /**
@@ -71,8 +74,10 @@ public class OvGeneratedHandler {
     public Outcome handle(PubSubPushMessage.Message message) {
         String messageId = message.messageId();
         if (!cfg.enabled()) {
-            LOG.infof("ov-generated %s acknowledged, the service is disabled", messageId);
-            return Outcome.DISABLED;
+            // Never acknowledge while switched off: the deadline job's retries are finite, so a dropped
+            // event could leave RELEASING fields with nothing left to finish them. Pub/Sub redelivers.
+            LOG.infof("ov-generated %s refused for redelivery, the service is disabled", messageId);
+            throw ProblemException.unavailable(SERVICE_DISABLED, "the service is disabled; redeliver later");
         }
         Optional<OvGeneratedEvent> read = OvGeneratedEvent.fromMessage(message, mapper);
         if (read.isEmpty()) {

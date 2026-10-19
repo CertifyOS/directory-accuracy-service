@@ -142,6 +142,32 @@ public class ReleaseFieldRepository {
     }
 
     /**
+     * Fields of any tenant left {@code RELEASE_REQUESTED} and untouched since {@code before}, oldest
+     * first, for the release reconciler: a request whose job was never enqueued, or whose job died
+     * before its claim. A release waiting for another one is put back every minute, which refreshes
+     * {@code updatedAt}, so it is never among these. On {@code field_recs_release_requested}.
+     *
+     * @param before the staleness cut-off
+     * @param limit the most documents to return, at least 1
+     * @return the documents, oldest first
+     */
+    public List<FieldRecommendation> staleRequested(Instant before, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1, got " + limit);
+        }
+        List<FieldRecommendation> docs = new ArrayList<>();
+        for (Document doc : recommendations()
+                .find(Filters.and(
+                        Filters.eq("reviewStatus", ReviewStatus.RELEASE_REQUESTED.name()),
+                        Filters.lt("updatedAt", before)))
+                .sort(Sorts.ascending("updatedAt", "_id"))
+                .limit(limit)) {
+            docs.add(FieldRecommendation.fromDocument(doc));
+        }
+        return docs;
+    }
+
+    /**
      * Records the DAL write on some {@code RELEASING} fields of a release: the caller's {@code $set}s
      * on {@code goldenRecordUpdate}, {@code updatedAt}, and the version bump every write makes. No
      * state change and no event (the release job's {@code written} step).

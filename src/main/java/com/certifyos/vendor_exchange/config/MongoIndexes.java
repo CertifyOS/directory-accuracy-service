@@ -180,6 +180,14 @@ public class MongoIndexes {
                         new IndexOptions()
                                 .name("field_recs_releasing_location")
                                 .partialFilterExpression(Filters.eq("reviewStatus", "RELEASING")));
+        // the release reconciler: requests left RELEASE_REQUESTED with no job, oldest first
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("updatedAt"),
+                        new IndexOptions()
+                                .name("field_recs_release_requested")
+                                .partialFilterExpression(Filters.eq("reviewStatus", "RELEASE_REQUESTED")));
 
         // vendor_rejected_values: the only TTL index in the service (design D16, plan P4)
         collections

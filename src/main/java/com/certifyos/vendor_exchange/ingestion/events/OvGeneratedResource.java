@@ -47,8 +47,13 @@ public class OvGeneratedResource {
             summary = "Receive a survivorship operational-value event",
             description = "Pub/Sub push endpoint for mdm.slice.ov_generated. Requires the subscription's OIDC identity "
                     + "token; reads the operational value back for fields released through a candor slice and "
-                    + "answers 204 to acknowledge every outcome, including an event that is not ours.")
+                    + "answers 204 to acknowledge every outcome, including an event that is not ours; answers 503 "
+                    + "while the service is switched off so the message is redelivered.")
     @APIResponse(responseCode = "204", description = "Acknowledged")
+    @APIResponse(
+            responseCode = "503",
+            description = "The service is switched off (SERVICE_DISABLED); Pub/Sub redelivers the message",
+            content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
     @APIResponse(
             responseCode = "401",
             description =

@@ -152,6 +152,15 @@ public class ReadBackService {
                 : operationalValues.practitioner(tenantId, certifyId, true);
         Map<String, ReadBack.Verdict> verdicts = verdicts(value, Crosswalks.sourceType(tenantId), covered);
         finish(tenantId, lifecycle.released(tenantId, covered, verdicts, completionSource, now), completionSource);
+        if (ReleaseLifecycle.EVENT.equals(completionSource) && written.size() < releasing.size()) {
+            // Fields at the entity whose write is not recorded yet may belong to this very run: ask for
+            // the event again rather than leave them to the deadline. The finished ones are not RELEASING
+            // any more, so the redelivery only looks at the rest.
+            LOG.infof(
+                    "tenant %s %s %s: %d field(s) finished, %d still without a recorded write; redelivery asked",
+                    tenantId, level, certifyId, covered.size(), releasing.size() - written.size());
+            return Result.NOT_WRITTEN;
+        }
         return Result.RELEASED;
     }
 

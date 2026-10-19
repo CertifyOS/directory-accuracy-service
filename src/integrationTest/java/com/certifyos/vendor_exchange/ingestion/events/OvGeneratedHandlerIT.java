@@ -7,8 +7,11 @@ import com.certifyos.vendor_exchange.audit.AuditEventType;
 import com.certifyos.vendor_exchange.audit.AuditRepository;
 import com.certifyos.vendor_exchange.auth.GoogleIdTokenService;
 import com.certifyos.vendor_exchange.auth.WireMockDal;
+import com.certifyos.vendor_exchange.config.VendorExchangeConfig;
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
+import com.certifyos.vendor_exchange.http.ProblemException;
 import com.certifyos.vendor_exchange.ingestion.jobs.IngestionJobEnqueuer;
+import com.certifyos.vendor_exchange.ingestion.release.ReadBackService;
 import com.certifyos.vendor_exchange.ingestion.release.ReleaseFixtures;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendation.GoldenRecordUpdate;
@@ -16,6 +19,7 @@ import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationReposi
 import com.certifyos.vendor_exchange.ingestion.staging.ReviewStatus;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
 import com.certifyos.vendor_exchange.persistence.Collections;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -77,6 +81,9 @@ class OvGeneratedHandlerIT {
 
     @InjectMock
     GoogleIdTokenService tokens;
+
+    @Inject
+    ObjectMapper mapper;
 
     @BeforeEach
     void before() {
@@ -271,6 +278,53 @@ class OvGeneratedHandlerIT {
         Assertions.assertEquals(OvGeneratedHandler.Outcome.NOT_COVERED, elsewhere);
         Assertions.assertEquals(doc, read(doc), "the field waits for the run that includes its write");
         WireMockDal.verify(0, WireMock.getRequestedFor(WireMock.urlPathMatching("/locations/ov/.*")));
+    }
+
+    @Test
+    void coveredFieldsFinishAndAnUnwrittenSiblingAsksForRedelivery() {
+        String tenant = "ovgen-sibling";
+        List<FieldRecommendation> docs = ReleaseFixtures.insert(
+                collections,
+                writtenField(tenant, "loc-1", "phone", "rel-ovgen-sib-1", "CoreLocation", "slice-candor-loc"),
+                ReleaseFixtures.field(
+                        tenant,
+                        "cert-2",
+                        "1003002891",
+                        "loc-1",
+                        "fax",
+                        "3035550199",
+                        ReviewStatus.RELEASING,
+                        4L,
+                        ReleaseFixtures.requested("rel-ovgen-sib-2", "CoreLocation")));
+        stubOv("/locations/ov/loc-1", "[\"slice-candor-loc\"]", "{\"contacts\": \"candor:" + tenant + "\"}");
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> handler.handle(
+                        message(tenant, "loc-1", "location", "candor:" + tenant, "slice-candor-loc", Instant.now())),
+                "the sibling's write may be in this run; Pub/Sub redelivers");
+
+        Assertions.assertEquals(ReviewStatus.RELEASED, read(docs.get(0)).reviewStatus(), "the covered field is done");
+        Assertions.assertEquals(ReviewStatus.RELEASING, read(docs.get(1)).reviewStatus());
+    }
+
+    @Test
+    void aSwitchedOffServiceRefusesForRedelivery() {
+        VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class);
+        Mockito.when(disabled.enabled()).thenReturn(false);
+        OvGeneratedHandler off = new OvGeneratedHandler(
+                Mockito.mock(ReadBackService.class),
+                Mockito.mock(VendorExchangeMetrics.class),
+                mapper,
+                disabled,
+                java.time.Clock.systemUTC());
+
+        ProblemException refused = Assertions.assertThrows(
+                ProblemException.class,
+                () -> off.handle(message("ovgen-off", "cert-1", "practitioner", "candor:ovgen-off")));
+
+        Assertions.assertEquals(503, refused.status());
+        Assertions.assertEquals(OvGeneratedHandler.SERVICE_DISABLED, refused.code());
     }
 
     @Test
