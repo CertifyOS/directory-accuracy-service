@@ -394,6 +394,29 @@ class CompletionHandlerIT {
     }
 
     @Test
+    void redeliveryAfterTheReconcilerHandedOverEnqueuesNoSecondStageJob() {
+        String tenant = "compl-reconciled";
+        Seeded seeded = requested(tenant);
+        UUID reconciled = IngestionJobEnqueuer.reconciledId(
+                StageRowsJob.NAME, seeded.entry().uploadId(), 1, 1);
+        collections
+                .batches()
+                .updateOne(
+                        Filters.eq("_id", seeded.batch().id()),
+                        Updates.combine(
+                                Updates.set("inboundFiles.0.state", InboundFileState.PARSED.name()),
+                                Updates.set("inboundFiles.0.reconciliations", 1),
+                                Updates.set("inboundFiles.0.jobId", reconciled.toString())));
+
+        Assertions.assertEquals(
+                CompletionHandler.Outcome.STATE_PASSED,
+                handler.handle(message("m-rc1", parsedBody(tenant, externalRef(seeded), seeded, "COMPLETED"))));
+
+        Assertions.assertFalse(jobExists(stageJobId(seeded)), "the reconciled stage job owns the entry");
+        Assertions.assertEquals(reconciled.toString(), entry(seeded).jobId());
+    }
+
+    @Test
     void archivingEntryIsRetried() {
         String tenant = "compl-archiving";
         Seeded seeded = InboundFixtures.deliveredBatchWithEntry(

@@ -240,6 +240,27 @@ class IngestionDeadlineCheckJobIT {
     }
 
     @Test
+    void parsedEntryStillOwnedByTheCheckIsHandedToStaging() {
+        String tenant = "ingdl-handover";
+        Seeded seeded = seed(tenant, InboundFileState.PARSED);
+        // the parse committed and the stage enqueue did not: the entry still names this check
+        UUID deadline = IngestionJobEnqueuer.deadlineCheckId(seeded.entry().uploadId(), 1);
+        collections
+                .batches()
+                .updateOne(
+                        Filters.eq("_id", seeded.batch().id()),
+                        Updates.set("inboundFiles.0.jobId", deadline.toString()));
+
+        run(seeded);
+
+        UUID stageJobId = JobIds.of("stage-rows", seeded.entry().uploadId(), 1);
+        Assertions.assertEquals(
+                StateName.ENQUEUED, storage.getJobById(stageJobId).getState());
+        Assertions.assertEquals(stageJobId.toString(), entry(seeded).jobId());
+        WireMockUpstreams.verify(0, WireMock.getRequestedFor(WireMock.urlEqualTo(statusPath(tenant))));
+    }
+
+    @Test
     void entryAlreadyParsedMakesNoStatusCall() {
         String tenant = "ingdl-parsed";
         Seeded seeded = seed(tenant, InboundFileState.PARSED);
