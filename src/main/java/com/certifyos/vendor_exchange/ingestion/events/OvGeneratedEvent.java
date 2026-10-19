@@ -2,10 +2,13 @@ package com.certifyos.vendor_exchange.ingestion.events;
 
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
 import com.certifyos.vendor_exchange.ingestion.release.Crosswalks;
+import com.certifyos.vendor_exchange.ingestion.release.ReadBackService;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldLevel;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
@@ -109,6 +112,31 @@ public record OvGeneratedEvent(
     public boolean triggeredByCandor() {
         return payload.triggeringCrosswalks().stream().anyMatch(crosswalk -> ours(crosswalk.sourceType()))
                 || triggeringSourceTypes.stream().anyMatch(OvGeneratedEvent::ours);
+    }
+
+    /**
+     * Our candor slices among the triggering crosswalks, as the read-back matches them against the
+     * recorded writes; the change time is null when absent or not an ISO instant.
+     *
+     * @return the triggers, possibly empty when only the attribute named a candor source
+     */
+    public List<ReadBackService.Trigger> ourTriggers() {
+        return payload.triggeringCrosswalks().stream()
+                .filter(crosswalk -> ours(crosswalk.sourceType()))
+                .map(crosswalk -> new ReadBackService.Trigger(
+                        crosswalk.certifyId(), crosswalk.crosswalkId(), instantOf(crosswalk.updatedAt())))
+                .toList();
+    }
+
+    private static Instant instantOf(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value);
+        } catch (DateTimeParseException unparsed) {
+            return null;
+        }
     }
 
     /**

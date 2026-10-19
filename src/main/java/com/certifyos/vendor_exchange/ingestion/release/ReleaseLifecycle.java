@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
@@ -88,16 +89,23 @@ public class ReleaseLifecycle {
 
     /**
      * Records the DAL write on the release's {@code RELEASING} fields: {@code goldenRecordUpdate.resource},
-     * {@code crosswalkId}, {@code sliceId}, {@code writtenAt} and {@code deadlineJobId}, in one
+     * {@code crosswalkId}, {@code sliceId}, {@code sentAt}, {@code writtenAt} and {@code deadlineJobId}, in one
      * transaction, no event. The fields stay {@code RELEASING} until the read-back.
      *
      * @param tenantId the tenant
      * @param releaseId the release
      * @param writes each slice write and its fields
+     * @param sentAt when the job sent the DAL batch, the earliest time the write can carry
      * @param writtenAt when the DAL accepted the batch
      * @param deadlineJobId the read-back deadline the job schedules next
      */
-    public void written(String tenantId, String releaseId, List<Write> writes, Instant writtenAt, UUID deadlineJobId) {
+    public void written(
+            String tenantId,
+            String releaseId,
+            List<Write> writes,
+            Instant sentAt,
+            Instant writtenAt,
+            UUID deadlineJobId) {
         long marked = transactions.run(session -> {
             long count = 0;
             for (Write write : writes) {
@@ -110,6 +118,7 @@ public class ReleaseLifecycle {
                                 Updates.set("goldenRecordUpdate.resource", write.resource()),
                                 Updates.set("goldenRecordUpdate.crosswalkId", write.crosswalkId()),
                                 Updates.set("goldenRecordUpdate.sliceId", write.sliceId()),
+                                Updates.set("goldenRecordUpdate.sentAt", sentAt),
                                 Updates.set("goldenRecordUpdate.writtenAt", writtenAt),
                                 Updates.set("goldenRecordUpdate.deadlineJobId", deadlineJobId.toString())),
                         writtenAt);
@@ -239,7 +248,10 @@ public class ReleaseLifecycle {
      * claim's transaction could not see another job's uncommitted claim and both would go on. Each job
      * counts after its own claim committed, so of two concurrent jobs at least one sees the other; a
      * non-zero count puts this release's fields back to {@code RELEASE_REQUESTED} and throws, so
-     * JobRunr retries the job later. A release an earlier run already wrote skips the count: its DAL
+     * JobRunr retries the job later. The count also takes the fields of other releases, of any
+     * practitioner, that are {@code RELEASING} and not yet written at one of this release's locations:
+     * every practitioner at a location writes the same candor location slice, read, merged and written
+     * whole, so two of them at once would drop each other's values. A release an earlier run already wrote skips the count: its DAL
      * write is done and only its read-back deadline is missing.
      *
      * @param tenantId the tenant
@@ -269,7 +281,8 @@ public class ReleaseLifecycle {
         if (claimed.written()) {
             return Optional.of(claimed);
         }
-        long others = fields.countReleasing(tenantId, certifyPractitionerId, releaseId);
+        long others = fields.countReleasing(tenantId, certifyPractitionerId, releaseId)
+                + releaseFields.countUnwrittenReleasingAt(tenantId, locationsOf(releasing), releaseId);
         if (others > 0) {
             long back = transactions.run(session -> fields.moveAll(
                     session,
@@ -281,11 +294,21 @@ public class ReleaseLifecycle {
                     null,
                     now));
             throw new ReleaseInProgressException("release " + releaseId + ": " + others
-                    + " field(s) of another release of the practitioner are RELEASING; " + back
-                    + " field(s) put back for a retry");
+                    + " field(s) of another release of the practitioner, or not yet written at one of its"
+                    + " locations, are RELEASING; " + back + " field(s) put back for a retry");
         }
         LOG.infof("release %s: claimed %d field(s)", releaseId, releasing.size());
         return Optional.of(claimed);
+    }
+
+    private static Set<String> locationsOf(List<FieldRecommendation> releasing) {
+        Set<String> locations = new TreeSet<>();
+        for (FieldRecommendation field : releasing) {
+            if (field.location() != null && field.location().certifyLocationId() != null) {
+                locations.add(field.location().certifyLocationId());
+            }
+        }
+        return locations;
     }
 
     /**

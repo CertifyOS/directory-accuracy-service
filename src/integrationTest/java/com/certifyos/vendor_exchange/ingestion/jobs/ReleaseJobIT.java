@@ -397,6 +397,77 @@ class ReleaseJobIT {
     }
 
     @Test
+    void operationalDalAnswersPropagateForARetry() {
+        for (int status : new int[] {401, 403, 409, 429}) {
+            String tenant = "reljob-op-" + status;
+            ReleaseFixtures.stubRanking(tenant, true);
+            stubPractitionerOv("cert-op", "Dana", "Whitfield");
+            stubNoOwnPractitionerSlice(tenant);
+            WireMockDal.stubFor(WireMock.post(WireMock.urlEqualTo(BATCH))
+                    .withHeader(DalUserClient.ORGANIZATION_HEADER, WireMock.equalTo(tenant))
+                    .willReturn(WireMock.aResponse().withStatus(status)));
+            String release = "rel-op-" + status;
+            FieldRecommendation doc = ReleaseFixtures.insert(
+                            collections, requested(tenant, "cert-op", null, "first_name", "Danna", release))
+                    .get(0);
+
+            WebApplicationException failed =
+                    Assertions.assertThrows(WebApplicationException.class, () -> run(tenant, "cert-op", release));
+
+            Assertions.assertEquals(status, failed.getResponse().getStatus());
+            Assertions.assertEquals(
+                    ReviewStatus.RELEASING, read(doc).reviewStatus(), status + " is retried, not a refusal");
+        }
+    }
+
+    @Test
+    void aWriteWithoutASliceIdIsRetriedNotRecorded() {
+        String tenant = "reljob-noslice";
+        ReleaseFixtures.stubRanking(tenant, true);
+        stubPractitionerOv("cert-noslice", "Dana", "Whitfield");
+        stubNoOwnPractitionerSlice(tenant);
+        stubBatch(tenant, "[{\"alias\": \"practitioner\", \"result\": {}}]");
+        FieldRecommendation doc = ReleaseFixtures.insert(
+                        collections, requested(tenant, "cert-noslice", null, "first_name", "Danna", "rel-noslice"))
+                .get(0);
+
+        Assertions.assertThrows(IllegalStateException.class, () -> run(tenant, "cert-noslice", "rel-noslice"));
+
+        Assertions.assertEquals(ReviewStatus.RELEASING, read(doc).reviewStatus());
+        Assertions.assertNull(read(doc).goldenRecordUpdate().writtenAt(), "the retry writes again and records it");
+    }
+
+    @Test
+    void anotherPractitionersUnwrittenReleaseAtTheLocationMakesTheJobBackOff() {
+        String tenant = "reljob-sharedloc";
+        List<FieldRecommendation> docs = ReleaseFixtures.insert(
+                collections,
+                ReleaseFixtures.field(
+                        tenant,
+                        "cert-other",
+                        "1003002891",
+                        "loc-shared",
+                        "fax",
+                        "3035550199",
+                        ReviewStatus.RELEASING,
+                        4L,
+                        ReleaseFixtures.requested("rel-other", "CoreLocation")),
+                requested(tenant, "cert-mine", "loc-shared", "phone", "3035550100", "rel-mine"));
+
+        ReleaseInProgressException backedOff =
+                Assertions.assertThrows(ReleaseInProgressException.class, () -> run(tenant, "cert-mine", "rel-mine"));
+
+        Assertions.assertTrue(backedOff.getMessage().contains("rel-mine"));
+        Assertions.assertEquals(
+                ReviewStatus.RELEASE_REQUESTED, read(docs.get(1)).reviewStatus());
+        WireMockDal.verify(0, batchFor(tenant));
+        Assertions.assertEquals(
+                0,
+                repository.countReleasing(tenant, "cert-mine", "rel-mine"),
+                "the practitioner has no other release: only the shared location made it back off");
+    }
+
+    @Test
     void retryAfterWriteSchedulesTheDeadlineOnly() {
         String tenant = "reljob-retry";
         Instant writtenAt = Instant.parse("2026-10-20T14:00:00Z");

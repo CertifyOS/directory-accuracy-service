@@ -127,6 +127,7 @@ class FieldRecommendationTest {
                 "location",
                 "cw-1",
                 "slice-1",
+                NOW.plusSeconds(65),
                 NOW.plusSeconds(70),
                 "job-1",
                 "WON",

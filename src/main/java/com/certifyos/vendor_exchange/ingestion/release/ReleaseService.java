@@ -48,6 +48,10 @@ public class ReleaseService {
     /** The fields this step releases, as the practitioner's or the location's candor slice (plan P10). */
     public static final List<String> SLICE_FIELDS = List.of("first_name", "last_name", "phone", "fax");
 
+    /** The fields the design releases in place through api-layer (D22), not built yet: refused, and listed as skipped. */
+    static final List<String> IN_PLACE_FIELDS =
+            List.of("specialties", "location", "practice_name", "accepting_new_patients", "pcp_at_location");
+
     static final String WRITE_PATH_SLICE = "SLICE";
     static final String CORE_PRACTITIONER = "CorePractitioner";
     static final String CORE_LOCATION = "CoreLocation";
@@ -170,6 +174,7 @@ public class ReleaseService {
                 null,
                 null,
                 null,
+                null,
                 null);
         Bson updates = Updates.combine(
                 Updates.set("goldenRecordUpdate", update.toDocument()),
@@ -247,16 +252,23 @@ public class ReleaseService {
      * @param tenantId the caller's tenant
      * @param exportBatchId the batch
      * @param actor the caller
-     * @return the releases and the skipped items; empty when the batch has no approved slice field
+     * @return the releases and the skipped items, which list the batch's approved in-place fields with
+     *     {@code IN_PLACE_RELEASE_UNSUPPORTED} so a reviewer sees what was left out; empty when the
+     *     batch has no approved field
      * @throws ProblemException 422 {@code RANKING_MISSING}
      */
     public Bulk requestBatch(String tenantId, String exportBatchId, String actor) {
         requireRanking(tenantId);
-        List<FieldRecommendation> approved = releaseFields.approvedInBatch(
-                tenantId, exportBatchId, SLICE_FIELDS, cfg.ingestion().releaseBulkMax());
+        int max = cfg.ingestion().releaseBulkMax();
+        List<FieldRecommendation> approved = releaseFields.approvedInBatch(tenantId, exportBatchId, SLICE_FIELDS, max);
         Map<String, Long> versions = new LinkedHashMap<>();
         approved.forEach(field -> versions.put(field.id(), field.version()));
-        return requestEach(tenantId, List.copyOf(versions.keySet()), versions, actor);
+        Bulk requested = requestEach(tenantId, List.copyOf(versions.keySet()), versions, actor);
+        List<Skipped> skipped = new ArrayList<>(requested.skipped());
+        releaseFields.approvedInBatch(tenantId, exportBatchId, IN_PLACE_FIELDS, max).stream()
+                .map(field -> new Skipped(field.id(), "IN_PLACE_RELEASE_UNSUPPORTED"))
+                .forEach(skipped::add);
+        return new Bulk(requested.releases(), skipped);
     }
 
     private Bulk requestEach(String tenantId, List<String> ids, Map<String, Long> versions, String actor) {
@@ -378,6 +390,7 @@ public class ReleaseService {
                     UNPROCESSABLE, "REMOVAL_NOT_RELEASED", "an NPI correction is a removal and is never released");
         }
         if (!SLICE_FIELDS.contains(field.field())) {
+            // IN_PLACE_FIELDS: written in place through api-layer (design D22), a later step.
             throw new ProblemException(
                     UNPROCESSABLE,
                     "IN_PLACE_RELEASE_UNSUPPORTED",

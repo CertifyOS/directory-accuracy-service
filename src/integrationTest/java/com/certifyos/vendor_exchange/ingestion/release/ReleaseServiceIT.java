@@ -333,7 +333,10 @@ class ReleaseServiceIT {
                 service.requestBatch(tenant, ReleaseFixtures.batchId(tenant), ReleaseFixtures.REVIEWER);
 
         Assertions.assertEquals(2, bulk.releases().size());
-        Assertions.assertEquals(List.of(), bulk.skipped());
+        Assertions.assertEquals(
+                List.of(new ReleaseService.Skipped(docs.get(3).id(), "IN_PLACE_RELEASE_UNSUPPORTED")),
+                bulk.skipped(),
+                "an approved in-place field is listed, not silently left out");
         Map<String, Set<String>> byPractitioner = bulk.releases().stream()
                 .collect(Collectors.toMap(
                         ReleaseService.Requested::certifyPractitionerId,
@@ -417,6 +420,7 @@ class ReleaseServiceIT {
                 "CorePractitioner",
                 "1003002890",
                 "slice-old",
+                null,
                 ReleaseFixtures.STAGED.plusSeconds(5),
                 "job-old",
                 null,

@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -41,7 +42,8 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
  * design's phase order: claim, ranking check, resolve the Golden practitioner and locations, the name
  * guard, read our own slices, merge, one transactional DAL {@code /batch} of whole-slice {@code UPSERT}s,
  * record the write, schedule the read-back deadline. A refusal (ranking, unknown entity, name sound, a
- * DAL {@code 4xx}) writes nothing and puts the fields back to {@code APPROVED}; a DAL {@code 5xx} or a
+ * DAL {@code 400} or {@code 422}) writes nothing and puts the fields back to {@code APPROVED}; any other
+ * DAL answer ({@code 401}, {@code 403}, {@code 408}, {@code 409}, {@code 429}, a {@code 5xx}) or a
  * connection failure propagates for JobRunr's retry with the fields still {@code RELEASING}. A retry
  * that finds the write recorded only schedules the deadline. This job never marks {@code RELEASED}:
  * the read-back does.
@@ -62,6 +64,9 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
     static final String LOCATION_ENTITY_ADDRESS = "LocationEntityAddress";
     static final String UPSERT = "UPSERT";
     static final int BODY_MAX = 400;
+
+    /** The DAL answers that refuse the batch itself; every other 4xx is operational and retried. */
+    static final Set<Integer> REFUSALS = Set.of(400, 422);
 
     private static final GenericType<List<DalOperationResult>> RESULTS = new GenericType<>() {};
     private static final Logger LOG = Logger.getLogger(ReleaseJob.class);
@@ -241,21 +246,30 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
     /** One DAL batch; on success the write is recorded and the read-back deadline scheduled. */
     private void write(ReleaseJobRequest request, Plan plan) {
         List<DalOperationResult> results;
+        Instant sentAt = clock.instant();
         try (Response response = batch.execute(request.tenantId(), new DalBatchRequest(true, plan.operations()))) {
             results = response.readEntity(RESULTS);
         } catch (WebApplicationException failure) {
             int status =
                     failure.getResponse() == null ? 500 : failure.getResponse().getStatus();
-            if (status >= 400 && status < 500) {
+            if (REFUSALS.contains(status)) {
                 throw new Refused(DAL_REJECTED, "HTTP " + status + ": " + bodyOf(failure));
             }
+            // 401/403 (the IAP token), 408, 409, 429 and every 5xx are operational: JobRunr retries.
             throw failure;
         }
         List<ReleaseLifecycle.Write> writes = new ArrayList<>();
         for (Pending pending : plan.pending()) {
             String sliceId = sliceIdOf(results, pending.alias());
             if (sliceId == null) {
-                sliceId = pending.readBack().get().certifyId();
+                Slice read = own(pending.readBack());
+                sliceId = read == null ? null : read.certifyId();
+            }
+            if (sliceId == null) {
+                // Recording a write without its slice id would leave the fields RELEASING for good: the
+                // read-back cannot match them and a retry would skip to the deadline. Retry the job.
+                throw new IllegalStateException("release " + request.releaseId() + ": the DAL accepted the "
+                        + pending.resource() + " write but no slice id could be read for " + pending.alias());
             }
             writes.add(
                     new ReleaseLifecycle.Write(pending.fieldIds(), pending.resource(), pending.crosswalkId(), sliceId));
@@ -265,6 +279,7 @@ public class ReleaseJob implements JobRequestHandler<ReleaseJobRequest> {
                 request.tenantId(),
                 request.releaseId(),
                 writes,
+                sentAt,
                 writtenAt,
                 IngestionJobEnqueuer.readBackDeadlineId(request.releaseId()));
         scheduleDeadline(request, writtenAt);

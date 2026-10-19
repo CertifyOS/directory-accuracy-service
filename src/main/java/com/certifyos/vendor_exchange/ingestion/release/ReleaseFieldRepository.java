@@ -117,6 +117,31 @@ public class ReleaseFieldRepository {
     }
 
     /**
+     * How many fields of other releases are {@code RELEASING} at any of the given locations and not
+     * written yet: the window in which a release reads the shared candor location slice, merges and
+     * writes it whole. Once a write is recorded the slice holds it, so the next release's read sees it;
+     * a written field waiting for its read-back does not block. On {@code field_recs_decided_list}
+     * (the state is one of the decided states it covers).
+     *
+     * @param tenantId the tenant
+     * @param certifyLocationIds the locations the release writes
+     * @param releaseId the release asking, whose own fields are not counted
+     * @return the count
+     */
+    public long countUnwrittenReleasingAt(String tenantId, Collection<String> certifyLocationIds, String releaseId) {
+        if (certifyLocationIds.isEmpty()) {
+            return 0;
+        }
+        return recommendations()
+                .countDocuments(Filters.and(
+                        Filters.eq("tenantId", tenantId),
+                        Filters.eq("reviewStatus", ReviewStatus.RELEASING.name()),
+                        Filters.in("location.certifyLocationId", certifyLocationIds),
+                        Filters.ne("goldenRecordUpdate.releaseId", releaseId),
+                        Filters.exists("goldenRecordUpdate.writtenAt", false)));
+    }
+
+    /**
      * Records the DAL write on some {@code RELEASING} fields of a release: the caller's {@code $set}s
      * on {@code goldenRecordUpdate}, {@code updatedAt}, and the version bump every write makes. No
      * state change and no event (the release job's {@code written} step).

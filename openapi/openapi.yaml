@@ -208,6 +208,8 @@ components:
           type: string
         sliceId:
           type: string
+        sentAt:
+          $ref: "#/components/schemas/Instant"
         writtenAt:
           $ref: "#/components/schemas/Instant"
         deadlineJobId:

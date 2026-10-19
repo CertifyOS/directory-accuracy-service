@@ -171,7 +171,8 @@ class VendorReleaseResourceIT {
                 .then()
                 .statusCode(202)
                 .body("releases.fieldRecommendationIds.flatten()", Matchers.hasItem(fax.id()))
-                .body("skipped", Matchers.empty());
+                // other tests of the class leave approved in-place fields in the batch; only those are listed
+                .body("skipped.code", Matchers.everyItem(Matchers.equalTo("IN_PLACE_RELEASE_UNSUPPORTED")));
         Assertions.assertEquals(
                 ReviewStatus.RELEASE_REQUESTED,
                 repository.find(TENANT, fax.id()).orElseThrow().reviewStatus());

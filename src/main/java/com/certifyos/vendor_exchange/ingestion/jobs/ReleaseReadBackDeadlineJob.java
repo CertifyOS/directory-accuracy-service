@@ -23,8 +23,9 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
  * The read-back deadline (plan P13): scheduled by the release job at {@code writtenAt +
  * releaseReadBackDeadlineMinutes}, deleted by the {@code mdm.slice.ov_generated} handler once the
  * release is read back. When it runs, the event was lost: it reads each entity of the release that
- * still has {@code RELEASING} fields once ({@code completionSource = DEADLINE}); a read that fails
- * here marks those fields {@code RELEASED UNKNOWN} with a warning (alert A14).
+ * still has {@code RELEASING} fields once ({@code completionSource = DEADLINE}) and finishes only this
+ * release's fields there; a read that fails here marks those fields {@code RELEASED UNKNOWN} with a
+ * warning (alert A14).
  */
 @ApplicationScoped
 public class ReleaseReadBackDeadlineJob implements JobRequestHandler<ReleaseReadBackDeadlineJobRequest> {
@@ -75,8 +76,8 @@ public class ReleaseReadBackDeadlineJob implements JobRequestHandler<ReleaseRead
     private void readOnce(
             ReleaseReadBackDeadlineJobRequest request, Entity entity, List<FieldRecommendation> fields, Instant now) {
         try {
-            ReadBackService.Result result = readBack.readAndFinish(
-                    request.tenantId(), entity.certifyId(), entity.level(), ReleaseLifecycle.DEADLINE, now);
+            ReadBackService.Result result = readBack.atDeadline(
+                    request.tenantId(), entity.certifyId(), entity.level(), request.releaseId(), now);
             LOG.infof(
                     "release %s %s %s: deadline read-back %s",
                     request.releaseId(), entity.level(), entity.certifyId(), result);

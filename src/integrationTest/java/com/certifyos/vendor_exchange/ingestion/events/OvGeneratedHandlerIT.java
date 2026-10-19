@@ -87,11 +87,23 @@ class OvGeneratedHandlerIT {
     /** Survivorship's envelope for one entity, as the push subscription delivers it. */
     static PubSubPushMessage.Message message(
             String tenant, String certifyId, String entityType, String triggeringSourceType) {
+        return message(tenant, certifyId, entityType, triggeringSourceType, "slice-x", Instant.now());
+    }
+
+    /** The envelope with one triggering slice: its id and when it changed. */
+    static PubSubPushMessage.Message message(
+            String tenant,
+            String certifyId,
+            String entityType,
+            String triggeringSourceType,
+            String triggeringSliceId,
+            Instant changedAt) {
         String envelope = "{\"eventId\": \"ev-" + certifyId + "\", \"serviceSource\": \"survivorship\","
                 + " \"payload\": {\"certifyId\": \"" + certifyId + "\", \"tenantId\": \"" + tenant + "\","
                 + " \"entityType\": \"" + entityType + "\", \"crosswalks\": [],"
-                + " \"triggeringCrosswalks\": [{\"certifyId\": \"slice-x\", \"crosswalkId\": \"cw-x\","
-                + " \"sourceType\": \"" + triggeringSourceType + "\", \"updatedAt\": \"2026-10-20T14:00:05Z\"}]}}";
+                + " \"triggeringCrosswalks\": [{\"certifyId\": \"" + triggeringSliceId
+                + "\", \"crosswalkId\": \"cw-x\","
+                + " \"sourceType\": \"" + triggeringSourceType + "\", \"updatedAt\": \"" + changedAt + "\"}]}}";
         return new PubSubPushMessage.Message(
                 Base64.getEncoder().encodeToString(envelope.getBytes(StandardCharsets.UTF_8)),
                 "m-" + certifyId,
@@ -148,8 +160,8 @@ class OvGeneratedHandlerIT {
                 "[\"slice-roster\", \"slice-candor-1\"]",
                 "{\"firstName\": \"candor:" + tenant + "\", \"lastName\": \"roster:" + tenant + "\"}");
 
-        OvGeneratedHandler.Outcome outcome =
-                handler.handle(message(tenant, "cert-1", "practitioner", "candor:" + tenant));
+        OvGeneratedHandler.Outcome outcome = handler.handle(
+                message(tenant, "cert-1", "practitioner", "candor:" + tenant, "slice-candor-1", Instant.now()));
 
         Assertions.assertEquals(OvGeneratedHandler.Outcome.RELEASED, outcome);
         GoldenRecordUpdate first = read(docs.get(0)).goldenRecordUpdate();
@@ -208,7 +220,8 @@ class OvGeneratedHandlerIT {
         UUID deadline = scheduleDeadline(tenant, release);
         stubOv("/locations/ov/loc-1", "[\"slice-candor-loc\"]", "{\"contacts\": \"candor:" + tenant + "\"}");
 
-        OvGeneratedHandler.Outcome outcome = handler.handle(message(tenant, "loc-1", "location", "candor:" + tenant));
+        OvGeneratedHandler.Outcome outcome = handler.handle(
+                message(tenant, "loc-1", "location", "candor:" + tenant, "slice-candor-loc", Instant.now()));
 
         Assertions.assertEquals(OvGeneratedHandler.Outcome.RELEASED, outcome);
         Assertions.assertEquals(ReviewStatus.RELEASED, read(docs.get(0)).reviewStatus());
@@ -233,10 +246,31 @@ class OvGeneratedHandlerIT {
                 .get(0);
         stubOv("/practitioners/ov/cert-1", "[\"slice-roster\"]", "{\"lastName\": \"roster:" + tenant + "\"}");
 
-        handler.handle(message(tenant, "cert-1", "practitioner", "candor:" + tenant));
+        handler.handle(message(tenant, "cert-1", "practitioner", "candor:" + tenant, "slice-c", Instant.now()));
 
         Assertions.assertEquals(ReviewStatus.RELEASED, read(doc).reviewStatus());
         Assertions.assertEquals("NOT_APPLIED", read(doc).goldenRecordUpdate().outcome());
+    }
+
+    @Test
+    void anEarlierRunOrAnotherSliceFinishesNothing() {
+        String tenant = "ovgen-stale";
+        FieldRecommendation doc = ReleaseFixtures.insert(
+                        collections,
+                        writtenField(tenant, "loc-1", "phone", "rel-ovgen-stale", "CoreLocation", "slice-candor-loc"))
+                .get(0);
+
+        // a run triggered by our slice before this write was sent (a redelivery, or another
+        // practitioner's write at the same location), then a run for a slice that is not this write's
+        OvGeneratedHandler.Outcome earlier = handler.handle(
+                message(tenant, "loc-1", "location", "candor:" + tenant, "slice-candor-loc", WRITTEN.minusSeconds(60)));
+        OvGeneratedHandler.Outcome elsewhere =
+                handler.handle(message(tenant, "loc-1", "location", "candor:" + tenant, "slice-other", Instant.now()));
+
+        Assertions.assertEquals(OvGeneratedHandler.Outcome.NOT_COVERED, earlier);
+        Assertions.assertEquals(OvGeneratedHandler.Outcome.NOT_COVERED, elsewhere);
+        Assertions.assertEquals(doc, read(doc), "the field waits for the run that includes its write");
+        WireMockDal.verify(0, WireMock.getRequestedFor(WireMock.urlPathMatching("/locations/ov/.*")));
     }
 
     @Test

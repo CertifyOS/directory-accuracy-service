@@ -103,10 +103,11 @@ public final class ReleaseFixtures {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
-    /** The release record once the release job's DAL write was accepted. */
+    /** The release record once the release job's DAL write was accepted; sent one second before. */
     public static GoldenRecordUpdate written(
             String releaseId,
             String resource,
@@ -122,6 +123,7 @@ public final class ReleaseFixtures {
                 resource,
                 crosswalkId,
                 sliceId,
+                writtenAt == null ? null : writtenAt.minusSeconds(1),
                 writtenAt,
                 deadlineJobId,
                 null,

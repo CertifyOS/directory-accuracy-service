@@ -118,6 +118,28 @@ class ReleaseReadBackDeadlineJobIT {
     }
 
     @Test
+    void deadlineFinishesOnlyItsOwnReleaseAtASharedLocation() {
+        String tenant = "rbdl-shared";
+        List<FieldRecommendation> docs = ReleaseFixtures.insert(
+                collections,
+                written(tenant, "cert-rbdl-a", "loc-rbdl-s", "phone", "rel-rbdl-a", "slice-s"),
+                written(tenant, "cert-rbdl-b", "loc-rbdl-s", "fax", "rel-rbdl-b", "slice-s"));
+        stubOv(
+                "/locations/ov/loc-rbdl-s",
+                "{\"certifyLocationId\": \"loc-rbdl-s\", \"contributingSlices\": [\"slice-s\"],"
+                        + " \"contributionMap\": {\"contacts\": \"candor:" + tenant + "\"}}");
+
+        job.run(new ReleaseReadBackDeadlineJobRequest(tenant, "cert-rbdl-a", "rel-rbdl-a"));
+
+        Assertions.assertEquals(ReviewStatus.RELEASED, read(docs.get(0)).reviewStatus());
+        Assertions.assertEquals(
+                ReviewStatus.RELEASING,
+                read(docs.get(1)).reviewStatus(),
+                "the other practitioner's release waits for its own event or deadline");
+        Assertions.assertTrue(audit.findForRelease(tenant, "rel-rbdl-b", 10).isEmpty());
+    }
+
+    @Test
     void deadlineReadFailureMarksUnknown() {
         String tenant = "rbdl-fail";
         String release = "rel-rbdl-fail";

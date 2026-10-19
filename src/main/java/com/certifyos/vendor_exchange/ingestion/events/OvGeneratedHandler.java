@@ -3,7 +3,6 @@ package com.certifyos.vendor_exchange.ingestion.events;
 import com.certifyos.vendor_exchange.config.VendorExchangeConfig;
 import com.certifyos.vendor_exchange.export.events.PubSubPushMessage;
 import com.certifyos.vendor_exchange.ingestion.release.ReadBackService;
-import com.certifyos.vendor_exchange.ingestion.release.ReleaseLifecycle;
 import com.certifyos.vendor_exchange.ingestion.staging.FieldLevel;
 import com.certifyos.vendor_exchange.metrics.VendorExchangeMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -55,6 +54,8 @@ public class OvGeneratedHandler {
         NOTHING_RELEASING,
         /** The entity's written fields are {@code RELEASED} with their verdicts. */
         RELEASED,
+        /** The run did not include any of the entity's written fields (an earlier or another write). */
+        NOT_COVERED,
         /** The service is switched off; acknowledged with nothing written (the deadline reads later). */
         DISABLED
     }
@@ -91,15 +92,12 @@ public class OvGeneratedHandler {
                     messageId, event.payload().entityType());
             return Outcome.UNKNOWN_ENTITY_TYPE;
         }
-        ReadBackService.Result result = readBack.readAndFinish(
-                event.payload().tenantId(),
-                event.payload().certifyId(),
-                level,
-                ReleaseLifecycle.EVENT,
-                clock.instant());
+        ReadBackService.Result result = readBack.onEvent(
+                event.payload().tenantId(), event.payload().certifyId(), level, event.ourTriggers(), clock.instant());
         return switch (result) {
             case RELEASED, UNKNOWN_MARKED -> Outcome.RELEASED;
             case NOTHING_RELEASING -> Outcome.NOTHING_RELEASING;
+            case NOT_COVERED -> Outcome.NOT_COVERED;
             case NOT_WRITTEN -> throw new IllegalStateException("ov-generated " + messageId + ": "
                     + level + " " + event.payload().certifyId()
                     + " has RELEASING fields without a recorded write; redelivery expected");

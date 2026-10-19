@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 
@@ -59,22 +60,73 @@ public class ReadBackService {
          * {@code written} commit; the caller answers so the event is redelivered.
          */
         NOT_WRITTEN,
+        /**
+         * The entity's written {@code RELEASING} fields are not covered by this read-back: an event for
+         * another or an earlier write, or another release's fields at the deadline. Acknowledged.
+         */
+        NOT_COVERED,
         /** The deadline could not read the operational value; the fields are {@code RELEASED UNKNOWN}. */
         UNKNOWN_MARKED
     }
 
     /**
-     * Reads the entity's operational value and finishes its written {@code RELEASING} fields.
+     * One slice whose change triggered an operational-value run, as the event names it.
+     *
+     * @param sliceId the slice's certify id
+     * @param crosswalkId the slice's crosswalk id
+     * @param changedAt when the slice changed, null when the event did not say or it did not parse
+     */
+    public record Trigger(String sliceId, String crosswalkId, Instant changedAt) {}
+
+    /**
+     * The event path: reads the entity's operational value and finishes the written {@code RELEASING}
+     * fields the run covers. A field counts when one of our triggering slices is the slice its write
+     * recorded (by slice id or crosswalk) and that slice changed at or after the write was sent, so a
+     * redelivered or earlier run, or another practitioner's run on a shared location slice before this
+     * write, finishes nothing it does not include. A trigger without a change time matches by slice
+     * alone. Fields the run does not cover wait for their own event or their release's deadline.
      *
      * @param tenantId the tenant
      * @param certifyId the practitioner's or the location's certify id
      * @param level which of the two the id is
-     * @param completionSource {@link ReleaseLifecycle#EVENT} or {@link ReleaseLifecycle#DEADLINE}
+     * @param triggers our slices that triggered the run
      * @param now the write time
      * @return what happened
      */
-    public Result readAndFinish(
-            String tenantId, String certifyId, FieldLevel level, String completionSource, Instant now) {
+    public Result onEvent(String tenantId, String certifyId, FieldLevel level, List<Trigger> triggers, Instant now) {
+        return finishWhere(
+                tenantId, certifyId, level, field -> coveredBy(field, triggers), ReleaseLifecycle.EVENT, now);
+    }
+
+    /**
+     * The deadline path: reads the entity's operational value and finishes the written {@code
+     * RELEASING} fields of one release only; another release's fields at the same entity keep waiting
+     * for their own event or deadline.
+     *
+     * @param tenantId the tenant
+     * @param certifyId the practitioner's or the location's certify id
+     * @param level which of the two the id is
+     * @param releaseId the release whose deadline ran
+     * @param now the write time
+     * @return what happened
+     */
+    public Result atDeadline(String tenantId, String certifyId, FieldLevel level, String releaseId, Instant now) {
+        return finishWhere(
+                tenantId,
+                certifyId,
+                level,
+                field -> releaseId.equals(field.goldenRecordUpdate().releaseId()),
+                ReleaseLifecycle.DEADLINE,
+                now);
+    }
+
+    private Result finishWhere(
+            String tenantId,
+            String certifyId,
+            FieldLevel level,
+            Predicate<FieldRecommendation> eligible,
+            String completionSource,
+            Instant now) {
         List<FieldRecommendation> releasing = releaseFields.releasingAt(
                 tenantId, certifyId, level, lifecycle.config().ingestion().releaseBulkMax());
         if (releasing.isEmpty()) {
@@ -82,18 +134,41 @@ public class ReadBackService {
         }
         List<FieldRecommendation> written =
                 releasing.stream().filter(ReadBackService::isWritten).toList();
-        if (written.isEmpty()) {
+        List<FieldRecommendation> covered = written.stream().filter(eligible).toList();
+        if (covered.isEmpty()) {
+            if (written.size() < releasing.size()) {
+                LOG.infof(
+                        "tenant %s %s %s: %d field(s) RELEASING, %d with a recorded write, none covered yet",
+                        tenantId, level, certifyId, releasing.size(), written.size());
+                return Result.NOT_WRITTEN;
+            }
             LOG.infof(
-                    "tenant %s %s %s: %d field(s) RELEASING, none with a recorded write yet",
-                    tenantId, level, certifyId, releasing.size());
-            return Result.NOT_WRITTEN;
+                    "tenant %s %s %s: %d written field(s) RELEASING, none covered by this %s read-back",
+                    tenantId, level, certifyId, written.size(), completionSource);
+            return Result.NOT_COVERED;
         }
         OperationalValue value = level == FieldLevel.LOCATION
                 ? operationalValues.location(tenantId, certifyId, true)
                 : operationalValues.practitioner(tenantId, certifyId, true);
-        Map<String, ReadBack.Verdict> verdicts = verdicts(value, Crosswalks.sourceType(tenantId), written);
-        finish(tenantId, lifecycle.released(tenantId, written, verdicts, completionSource, now), completionSource);
+        Map<String, ReadBack.Verdict> verdicts = verdicts(value, Crosswalks.sourceType(tenantId), covered);
+        finish(tenantId, lifecycle.released(tenantId, covered, verdicts, completionSource, now), completionSource);
         return Result.RELEASED;
+    }
+
+    /** Whether one of the run's triggering slices is this field's write, changed at or after it was sent. */
+    static boolean coveredBy(FieldRecommendation field, List<Trigger> triggers) {
+        GoldenRecordUpdate update = field.goldenRecordUpdate();
+        for (Trigger trigger : triggers) {
+            boolean sameSlice = (trigger.sliceId() != null && trigger.sliceId().equals(update.sliceId()))
+                    || (trigger.crosswalkId() != null && trigger.crosswalkId().equals(update.crosswalkId()));
+            boolean late = trigger.changedAt() == null
+                    || update.sentAt() == null
+                    || !trigger.changedAt().isBefore(update.sentAt());
+            if (sameSlice && late) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
