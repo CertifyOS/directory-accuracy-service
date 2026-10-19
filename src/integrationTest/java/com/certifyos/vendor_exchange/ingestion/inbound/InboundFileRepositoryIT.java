@@ -522,4 +522,46 @@ public class InboundFileRepositoryIT {
     private static List<String> batchIds(List<Located> located) {
         return located.stream().map(found -> found.batch().id()).toList();
     }
+
+    @Test
+    void reconciledIsGuardedByStateAndTheLastWrite() {
+        InboundFixtures.Seeded seeded = InboundFixtures.deliveredBatchWithEntry(
+                transactions, batches, collections, "inrepo-reconciled", InboundFileState.STAGING);
+        String uploadId = seeded.entry().uploadId();
+        Located read = inbound.findByUploadId(uploadId).orElseThrow();
+        java.util.UUID firstJob = java.util.UUID.randomUUID();
+        java.util.UUID secondJob = java.util.UUID.randomUUID();
+
+        boolean first = transactions.run(session -> inbound.reconciled(session, read, firstJob, NOW));
+        boolean stale = transactions.run(session -> inbound.reconciled(session, read, secondJob, NOW.plusSeconds(1)));
+
+        Assertions.assertTrue(first);
+        Assertions.assertFalse(stale, "a reader whose updatedAt is out of date finds the entry written since");
+        InboundFile once = inbound.findByUploadId(uploadId).orElseThrow().entry();
+        Assertions.assertEquals(1, once.reconciliations());
+        Assertions.assertEquals(firstJob.toString(), once.jobId());
+        Assertions.assertEquals(NOW, once.updatedAt());
+        Assertions.assertEquals(InboundFileState.STAGING, once.state(), "the reconciler never moves the state");
+
+        Located again = inbound.findByUploadId(uploadId).orElseThrow();
+        boolean second = transactions.run(session -> inbound.reconciled(session, again, secondJob, NOW.plusSeconds(2)));
+        Assertions.assertTrue(second);
+        Assertions.assertEquals(
+                2, inbound.findByUploadId(uploadId).orElseThrow().entry().reconciliations());
+
+        transactions.run(session -> inbound.transition(
+                session,
+                seeded.batch().id(),
+                uploadId,
+                InboundFileState.STAGING,
+                InboundFileState.FAILED,
+                NOW.plusSeconds(3),
+                null));
+        Located failed = inbound.findByUploadId(uploadId).orElseThrow();
+        Located asReadBefore = new Located(failed.batch(), again.entry());
+        boolean left =
+                transactions.run(session -> inbound.reconciled(session, asReadBefore, firstJob, NOW.plusSeconds(4)));
+        Assertions.assertFalse(left, "an entry that left the state read is not touched");
+        Assertions.assertEquals(2, failed.entry().reconciliations());
+    }
 }

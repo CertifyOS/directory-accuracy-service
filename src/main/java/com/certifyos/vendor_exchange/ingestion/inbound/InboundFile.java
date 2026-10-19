@@ -40,6 +40,8 @@ import org.bson.Document;
  * @param parsedAt when the parse finished
  * @param stagedAt when staging finished
  * @param updatedAt the last write
+ * @param reconciliations how many times the reconciler re-enqueued the entry's job, 0 when never;
+ *     each re-enqueue runs under its own job id, so an earlier one that ended never blocks the next
  */
 public record InboundFile(
         String uploadId,
@@ -66,7 +68,8 @@ public record InboundFile(
         Instant requestedAt,
         Instant parsedAt,
         Instant stagedAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        int reconciliations) {
 
     private static final char SEPARATOR = '|';
 
@@ -248,7 +251,8 @@ public record InboundFile(
                 null,
                 null,
                 null,
-                now);
+                now,
+                0);
     }
 
     /** The BSON shape, absent fields left out. */
@@ -281,6 +285,9 @@ public record InboundFile(
         Documents.put(doc, "parsedAt", parsedAt);
         Documents.put(doc, "stagedAt", stagedAt);
         Documents.put(doc, "updatedAt", updatedAt);
+        if (reconciliations != 0) {
+            doc.append("reconciliations", reconciliations);
+        }
         return doc;
     }
 
@@ -288,10 +295,12 @@ public record InboundFile(
      * Reads the BSON shape.
      *
      * @param doc one {@code inboundFiles} element
-     * @return the entry; a document written before {@code attempt} existed reads as 0
+     * @return the entry; a document written before {@code attempt} existed reads as 0, and one never
+     *     reconciled has 0 {@code reconciliations}
      */
     public static InboundFile fromDocument(Document doc) {
         Integer storedAttempt = Documents.intValue(doc, "attempt");
+        Integer storedReconciliations = Documents.intValue(doc, "reconciliations");
         return new InboundFile(
                 doc.getString("uploadId"),
                 doc.getString("generation"),
@@ -319,7 +328,8 @@ public record InboundFile(
                 Documents.instant(doc, "requestedAt"),
                 Documents.instant(doc, "parsedAt"),
                 Documents.instant(doc, "stagedAt"),
-                Documents.instant(doc, "updatedAt"));
+                Documents.instant(doc, "updatedAt"),
+                storedReconciliations == null ? 0 : storedReconciliations);
     }
 
     private static InboundFileState stateOf(Document doc) {

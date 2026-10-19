@@ -56,7 +56,8 @@ class InboundFileTest {
                 Instant.parse("2026-10-15T09:12:52Z"),
                 Instant.parse("2026-10-15T09:14:02Z"),
                 Instant.parse("2026-10-15T09:15:30Z"),
-                Instant.parse("2026-10-15T09:15:31Z"));
+                Instant.parse("2026-10-15T09:15:31Z"),
+                3);
     }
 
     @Test
@@ -68,6 +69,7 @@ class InboundFileTest {
         Assertions.assertEquals("STAGED", stored.getString("state"));
         Assertions.assertEquals(
                 1830L, stored.get("dispositions", Document.class).getLong("STAGED"));
+        Assertions.assertEquals(3, stored.getInteger("reconciliations"));
     }
 
     @Test
@@ -133,6 +135,7 @@ class InboundFileTest {
         Assertions.assertEquals(Instant.parse("2026-10-15T09:15:30Z"), read.stagedAt());
         Assertions.assertNull(read.overwroteGeneration());
         Assertions.assertNull(read.failureReason());
+        Assertions.assertEquals(0, read.reconciliations(), "an entry never reconciled reads 0");
         Assertions.assertEquals("vendor-sftp", read.bucket());
         Assertions.assertEquals(OBJECT, read.objectName());
     }
@@ -240,7 +243,8 @@ class InboundFileTest {
                 base.requestedAt(),
                 base.parsedAt(),
                 base.stagedAt(),
-                base.updatedAt());
+                base.updatedAt(),
+                base.reconciliations());
     }
 
     @Test

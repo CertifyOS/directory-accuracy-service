@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Predicate;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -307,6 +308,36 @@ public class InboundFileRepository {
                 .batches()
                 .updateOne(session, entryIn(exportBatchId, uploadId, inState), withBase(entryUpdates, base));
         return result.getMatchedCount() == 1;
+    }
+
+    /**
+     * The reconciler re-enqueued an entry's job: {@code reconciliations} goes up by one, the new job
+     * becomes the entry's {@code jobId} and {@code updatedAt} moves to {@code now}, so the entry is
+     * not stale again for another {@code inboundStaleMinutes}. The state never changes. Guarded on
+     * the state and the {@code updatedAt} the reconciler read together: an entry any writer touched
+     * since the read (a job's progress, or a second reconciler) is left alone.
+     *
+     * @param session the transaction
+     * @param located the entry as the reconciler read it
+     * @param jobId the job the reconciler is about to enqueue
+     * @param now the write time
+     * @return true when the entry was untouched since the read and is now updated
+     */
+    public boolean reconciled(ClientSession session, Located located, UUID jobId, Instant now) {
+        InboundFile entry = located.entry();
+        Bson untouched = Filters.and(
+                Filters.eq("_id", located.batch().id()),
+                Filters.elemMatch(
+                        FIELD,
+                        Filters.and(
+                                Filters.eq("uploadId", entry.uploadId()),
+                                Filters.eq("state", entry.state().name()),
+                                Filters.eq("updatedAt", entry.updatedAt()))));
+        Bson updates = Updates.combine(
+                Updates.inc(entry("reconciliations"), 1),
+                Updates.set(entry("jobId"), jobId.toString()),
+                Updates.set(entry("updatedAt"), now));
+        return collections.batches().updateOne(session, untouched, updates).getModifiedCount() == 1;
     }
 
     /**

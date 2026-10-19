@@ -260,6 +260,42 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "400":
           description: Bad Request
+  /internal/vendor-ingestion/completions:
+    post:
+      summary: Receive a file-ingestion completion event
+      description: "Pub/Sub push endpoint for file-ingestion's completion events on\
+        \ this consumer's topic. Requires the subscription's OIDC identity token;\
+        \ reads the base64 event body, finds the inbound file by externalRef and records\
+        \ the parse outcome. Answers 204 to acknowledge every outcome, including an\
+        \ event it cannot read or match, and 503 while the ingestion request for the\
+        \ file is not committed yet, so the event is delivered again."
+      tags:
+      - internal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PubSubPushMessage"
+        required: true
+      responses:
+        "204":
+          description: Acknowledged
+        "401":
+          description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
+            \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The inbound file's ingestion request is not committed yet;
+            redeliver (ARCHIVING_NOT_COMMITTED)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "400":
+          description: Bad Request
   /v1/vendor-exports:
     get:
       summary: List export batches
