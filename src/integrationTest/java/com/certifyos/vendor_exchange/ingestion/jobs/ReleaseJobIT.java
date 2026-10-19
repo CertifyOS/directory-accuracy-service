@@ -463,9 +463,16 @@ class ReleaseJobIT {
                 requested(tenant, "cert-conc", null, "last_name", "Smyth", "rel-conc-2"));
 
         CompletableFuture<Void> first = CompletableFuture.runAsync(() -> run(tenant, "cert-conc", "rel-conc-1"));
+        // The first job reads its own slice only after its claim and its count, so once WireMock has seen
+        // that read the first job is past the point where a second claim could make it back off.
         Awaitility.await()
                 .atMost(10, TimeUnit.SECONDS)
-                .until(() -> read(docs.get(0)).reviewStatus() == ReviewStatus.RELEASING);
+                .ignoreExceptions()
+                .untilAsserted(() -> WireMockDal.verify(
+                        1,
+                        WireMock.getRequestedFor(
+                                WireMock.urlEqualTo("/core/practitioner/candor:" + tenant + "/" + NPI))));
+        Assertions.assertEquals(ReviewStatus.RELEASING, read(docs.get(0)).reviewStatus());
         ReleaseInProgressException backedOff =
                 Assertions.assertThrows(ReleaseInProgressException.class, () -> run(tenant, "cert-conc", "rel-conc-2"));
         first.get(10, TimeUnit.SECONDS);
