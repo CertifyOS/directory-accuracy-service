@@ -203,6 +203,33 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "400":
           description: Bad Request
+  /internal/vendor-ingestion/arrivals:
+    post:
+      summary: Receive a vendor bucket storage notification
+      description: "Pub/Sub push endpoint for object notifications under the vendor\
+        \ bucket. Requires the subscription's OIDC identity token; reads the message\
+        \ attributes only and answers 204 to acknowledge every outcome, including\
+        \ an event it ignores or cannot match."
+      tags:
+      - internal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PubSubPushMessage"
+        required: true
+      responses:
+        "204":
+          description: Acknowledged
+        "401":
+          description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
+            \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "400":
+          description: Bad Request
   /v1/vendor-exports:
     get:
       summary: List export batches
