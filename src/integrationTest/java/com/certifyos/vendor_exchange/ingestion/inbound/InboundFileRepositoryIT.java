@@ -11,6 +11,8 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundFileRepository.Loc
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
+import com.mongodb.client.ClientSession;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import io.quarkus.test.common.QuarkusTestResource;
@@ -65,6 +67,9 @@ public class InboundFileRepositoryIT {
     @Inject
     ManagedExecutor executor;
 
+    @Inject
+    MongoClient mongo;
+
     @Test
     void firstClaimIsReceivedSecondUploadIsDuplicateLogged() {
         ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, "inrepo-first");
@@ -111,44 +116,68 @@ public class InboundFileRepositoryIT {
         Assertions.assertTrue(inbound.findByUploadId("nobody|to/x|1").isEmpty());
     }
 
+    @Test
+    void claimOutsideATransactionIsRefused() {
+        ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, "inrepo-notx");
+        InboundFile entry = upload("inrepo-notx", batch.id(), "2101");
+
+        try (ClientSession session = mongo.startSession()) {
+            Assertions.assertThrows(IllegalStateException.class, () -> inbound.claim(session, batch.id(), entry));
+        }
+        Assertions.assertNull(storedEntries(batch.id()), "the refused claim wrote nothing");
+    }
+
     /**
-     * Ten writers claim the same upload at once. Each task waits on a barrier of ten before it starts
-     * its transaction, so the barrier only opens when all ten are running on their own threads at the
-     * same time; a serial executor would leave the first task waiting and the barrier times out,
-     * failing the test. The losers hit a write conflict, the driver re-runs their body, and the
-     * re-run reads the winner's entry and matches nothing.
+     * Ten writers claim the same upload at once (see {@link #claimTogether} for why they really run
+     * together). The losers hit a write conflict, the driver re-runs their body, and the re-run reads
+     * the winner's entry and matches nothing.
      */
     @Test
     void claimUnderConcurrentWritersCreatesOneEntry() throws Exception {
         ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, "inrepo-race");
         InboundFile entry = upload("inrepo-race", batch.id(), "3001");
-        CyclicBarrier start = new CyclicBarrier(WRITERS);
-        AtomicInteger bodyRuns = new AtomicInteger();
-        Set<String> threads = ConcurrentHashMap.newKeySet();
 
-        List<CompletableFuture<Claim>> writers = new ArrayList<>();
-        for (int writer = 0; writer < WRITERS; writer++) {
-            writers.add(executor.supplyAsync(() -> {
-                threads.add(Thread.currentThread().getName());
-                awaitTogether(start);
-                return transactions.run(session -> {
-                    bodyRuns.incrementAndGet();
-                    return inbound.claim(session, batch.id(), entry);
-                });
-            }));
-        }
-        CompletableFuture.allOf(writers.toArray(CompletableFuture[]::new)).get(120, TimeUnit.SECONDS);
+        List<Claim> claims = claimTogether(batch.id(), java.util.Collections.nCopies(WRITERS, entry));
 
-        List<Claim> claims = new ArrayList<>();
-        for (CompletableFuture<Claim> writer : writers) {
-            claims.add(writer.get());
-        }
-        LOG.infof("%d writers on %d threads ran the claim body %d times", WRITERS, threads.size(), bodyRuns.get());
-        Assertions.assertEquals(WRITERS, threads.size(), "every writer ran on its own thread");
         Assertions.assertEquals(
                 1, claims.stream().filter(Claim::claimed).count(), "exactly one writer claims the upload");
         Assertions.assertTrue(claims.contains(new Claim(true, InboundFileState.RECEIVED, 1)));
         Assertions.assertEquals(1, storedEntries(batch.id()).size());
+    }
+
+    /**
+     * Ten distinct uploads of one batch arrive at once. Each claim decides {@code RECEIVED} or
+     * {@code DUPLICATE_LOGGED} from its read; only the transaction's write conflict on the batch
+     * document stops two of them from both reading an empty array and storing {@code RECEIVED}.
+     */
+    @Test
+    void distinctUploadsUnderConcurrentWritersHaveOneReceived() throws Exception {
+        ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, "inrepo-distinct");
+        List<InboundFile> uploads = new ArrayList<>();
+        for (int writer = 0; writer < WRITERS; writer++) {
+            uploads.add(upload("inrepo-distinct", batch.id(), String.valueOf(3101 + writer)));
+        }
+
+        List<Claim> claims = claimTogether(batch.id(), uploads);
+
+        Assertions.assertTrue(claims.stream().allMatch(Claim::claimed), "every distinct upload is recorded");
+        Assertions.assertEquals(
+                1,
+                claims.stream()
+                        .filter(claim -> claim.state() == InboundFileState.RECEIVED)
+                        .count());
+        Assertions.assertEquals(
+                WRITERS - 1,
+                claims.stream()
+                        .filter(claim -> claim.state() == InboundFileState.DUPLICATE_LOGGED)
+                        .count());
+        List<Document> stored = storedEntries(batch.id());
+        Assertions.assertEquals(WRITERS, stored.size());
+        Assertions.assertEquals(
+                1,
+                stored.stream()
+                        .filter(doc -> "RECEIVED".equals(doc.getString("state")))
+                        .count());
     }
 
     @Test
@@ -173,7 +202,9 @@ public class InboundFileRepositoryIT {
                 InboundFileState.ARCHIVING,
                 InboundFileState.INGESTION_REQUESTED,
                 NOW,
-                Updates.set(InboundFileRepository.entry("externalRef"), ref)));
+                Updates.combine(
+                        Updates.set(InboundFileRepository.entry("externalRef"), ref),
+                        Updates.set(InboundFileRepository.entry("state"), InboundFileState.STAGED.name()))));
         boolean stale = transactions.run(session -> inbound.transition(
                 session,
                 batchId,
@@ -196,7 +227,9 @@ public class InboundFileRepositoryIT {
                 received,
                 InboundFileState.RECEIVED,
                 NOW.plusSeconds(5),
-                Updates.set(InboundFileRepository.entry("jobId"), "job-received")));
+                Updates.combine(
+                        Updates.set(InboundFileRepository.entry("jobId"), "job-received"),
+                        Updates.set(InboundFileRepository.entry("updatedAt"), NOW.minusSeconds(3600)))));
         boolean wrongState = transactions.run(session -> inbound.updateInState(
                 session,
                 batchId,
@@ -208,7 +241,8 @@ public class InboundFileRepositoryIT {
         Assertions.assertFalse(wrongState);
 
         InboundFile movedEntry = inbound.findByUploadId(archiving).orElseThrow().entry();
-        Assertions.assertEquals(InboundFileState.INGESTION_REQUESTED, movedEntry.state());
+        Assertions.assertEquals(
+                InboundFileState.INGESTION_REQUESTED, movedEntry.state(), "a caller's entryUpdates cannot set state");
         Assertions.assertEquals(NOW, movedEntry.updatedAt());
         Assertions.assertEquals(ref, movedEntry.externalRef());
         InboundFile untouched = inbound.findByUploadId(received).orElseThrow().entry();
@@ -295,11 +329,12 @@ public class InboundFileRepositoryIT {
                 List.of(
                         new Seed(InboundFileState.RECEIVED, "6004", day(3)),
                         new Seed(InboundFileState.ARCHIVING, "6005", day(4))));
-        batchWith("inrepo-stale-d", List.of(new Seed(InboundFileState.RECEIVED, "6006", day(40))));
+        String batchD = batchWith("inrepo-stale-d", List.of(new Seed(InboundFileState.RECEIVED, "6006", day(40))));
+        Set<String> mine = Set.of(batchA, batchB, batchC, batchD);
         Instant olderThan = day(15);
 
-        List<Located> firstTwo = inbound.findStale(InboundFileState.reconcilable(), olderThan, 2);
-        List<Located> all = inbound.findStale(InboundFileState.reconcilable(), olderThan, 10);
+        List<Located> firstTwo = only(mine, inbound.findStale(InboundFileState.reconcilable(), olderThan, 2));
+        List<Located> all = only(mine, inbound.findStale(InboundFileState.reconcilable(), olderThan, 10));
 
         Assertions.assertEquals(List.of("6003", "6004"), generations(firstTwo));
         Assertions.assertEquals(List.of(batchB, batchC), batchIds(firstTwo));
@@ -308,8 +343,12 @@ public class InboundFileRepositoryIT {
         Assertions.assertEquals(day(2), all.get(0).entry().updatedAt());
         Assertions.assertEquals(
                 List.of("6003"),
-                generations(inbound.findStale(Set.of(InboundFileState.RECEIVED), day(3), 10)),
+                generations(only(mine, inbound.findStale(Set.of(InboundFileState.RECEIVED), day(3), 10))),
                 "batch A has a RECEIVED entry and an entry older than day 3, but not one entry that is both");
+
+        String plan =
+                aggregationPlan(InboundFileRepository.stalePipeline(InboundFileState.reconcilable(), olderThan, 10));
+        Assertions.assertTrue(plan.contains("batches_inbound_state_updated"), plan);
     }
 
     @Test
@@ -330,6 +369,10 @@ public class InboundFileRepositoryIT {
         Assertions.assertEquals(
                 oldest,
                 inbound.oldestUpdatedAtIn(InboundFileState.INGESTION_FAILED).orElseThrow());
+        String countPlan = aggregationPlan(InboundFileRepository.countPipeline());
+        Assertions.assertTrue(countPlan.contains("batches_inbound_upload_id"), countPlan);
+        String oldestPlan = aggregationPlan(InboundFileRepository.oldestPipeline(InboundFileState.INGESTION_FAILED));
+        Assertions.assertTrue(oldestPlan.contains("batches_inbound_state_updated"), oldestPlan);
     }
 
     private record Seed(InboundFileState state, String generation, Instant updatedAt) {}
@@ -382,6 +425,41 @@ public class InboundFileRepositoryIT {
         return doc.getList("inboundFiles", Document.class);
     }
 
+    /**
+     * Claims {@code entries} on {@code exportBatchId}, one writer per entry, each in its own
+     * transaction. Each writer waits on a barrier of all writers before it starts its transaction, so
+     * the barrier only opens when every writer is running on its own thread at the same time; a serial
+     * or smaller executor leaves the first writer waiting, the barrier times out and the test fails.
+     * The number of transaction bodies run is logged, not asserted: it shows the conflicts and re-runs
+     * on a given run but varies between runs.
+     */
+    private List<Claim> claimTogether(String exportBatchId, List<InboundFile> entries) throws Exception {
+        CyclicBarrier start = new CyclicBarrier(entries.size());
+        AtomicInteger bodyRuns = new AtomicInteger();
+        Set<String> threads = ConcurrentHashMap.newKeySet();
+        List<CompletableFuture<Claim>> writers = new ArrayList<>();
+        for (InboundFile entry : entries) {
+            writers.add(executor.supplyAsync(() -> {
+                threads.add(Thread.currentThread().getName());
+                awaitTogether(start);
+                return transactions.run(session -> {
+                    bodyRuns.incrementAndGet();
+                    return inbound.claim(session, exportBatchId, entry);
+                });
+            }));
+        }
+        CompletableFuture.allOf(writers.toArray(CompletableFuture[]::new)).get(120, TimeUnit.SECONDS);
+        List<Claim> claims = new ArrayList<>();
+        for (CompletableFuture<Claim> writer : writers) {
+            claims.add(writer.get());
+        }
+        LOG.infof(
+                "%s: %d writers on %d threads ran the claim body %d times",
+                exportBatchId, entries.size(), threads.size(), bodyRuns.get());
+        Assertions.assertEquals(entries.size(), threads.size(), "every writer ran on its own thread");
+        return claims;
+    }
+
     private static void awaitTogether(CyclicBarrier start) {
         try {
             start.await(30, TimeUnit.SECONDS);
@@ -391,6 +469,27 @@ public class InboundFileRepositoryIT {
         } catch (BrokenBarrierException | TimeoutException notTogether) {
             throw new IllegalStateException("the writers never ran at the same time", notTogether);
         }
+    }
+
+    /**
+     * The winning plan of an aggregation's first stage, as JSON. With the first stage pushed down the
+     * explain carries {@code queryPlanner} at the top; otherwise it sits under the first stage's
+     * {@code $cursor}.
+     */
+    private String aggregationPlan(List<Bson> pipeline) {
+        Document explain = collections.batches().aggregate(pipeline).explain();
+        Document planner = explain.get("queryPlanner", Document.class);
+        if (planner == null) {
+            Document first = explain.getList("stages", Document.class).get(0);
+            planner = first.get("$cursor", Document.class).get("queryPlanner", Document.class);
+        }
+        return planner.get("winningPlan", Document.class).toJson();
+    }
+
+    private static List<Located> only(Set<String> exportBatchIds, List<Located> located) {
+        return located.stream()
+                .filter(found -> exportBatchIds.contains(found.batch().id()))
+                .toList();
     }
 
     private static List<String> generations(List<Located> located) {

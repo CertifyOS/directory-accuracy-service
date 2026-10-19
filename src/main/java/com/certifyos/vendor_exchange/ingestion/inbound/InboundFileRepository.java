@@ -75,16 +75,21 @@ public class InboundFileRepository {
      * Adds an upload to a batch. The batch is read in the session: the first upload of the batch is
      * {@code RECEIVED}, any later one {@code DUPLICATE_LOGGED}, whatever state {@code entry} carries.
      * The push matches only while no element has the same {@code uploadId}, so a redelivered event
-     * adds nothing; two concurrent claims in transactions conflict on the batch document and the
-     * loser's re-run reads the winner's entry.
+     * adds nothing. The state comes from a read, so it is only race-free inside a transaction: two
+     * concurrent claims (of one upload or of two) conflict on the batch document and the loser's
+     * re-run reads the winner's entry. A session without an active transaction is refused.
      *
-     * @param session the transaction
+     * @param session the transaction, which must be active
      * @param exportBatchId the batch the object name points at
      * @param entry the upload, as {@link InboundFile#received} builds it
      * @return claimed with the state and the new count; not claimed, with the current count, when the
      *     upload is already on the batch or the batch does not exist (count 0)
+     * @throws IllegalStateException when {@code session} has no active transaction
      */
     public Claim claim(ClientSession session, String exportBatchId, InboundFile entry) {
+        if (!session.hasActiveTransaction()) {
+            throw new IllegalStateException("claim needs an active transaction: " + entry.uploadId());
+        }
         Document batch = collections
                 .batches()
                 .find(session, Filters.eq("_id", exportBatchId))
@@ -149,21 +154,28 @@ public class InboundFileRepository {
      * @return the stale entries, oldest first
      */
     public List<Located> findStale(Set<InboundFileState> states, Instant olderThan, int limit) {
-        List<String> names = states.stream().map(Enum::name).toList();
-        Bson stale = Filters.and(Filters.in("state", names), Filters.lt("updatedAt", olderThan));
-        List<Bson> pipeline = List.of(
-                Aggregates.match(Filters.elemMatch(FIELD, stale)),
-                Aggregates.unwind("$" + FIELD),
-                Aggregates.match(
-                        Filters.and(Filters.in(FIELD + ".state", names), Filters.lt(FIELD + ".updatedAt", olderThan))),
-                Aggregates.sort(Sorts.ascending(FIELD + ".updatedAt", "_id", FIELD + ".uploadId")),
-                Aggregates.limit(limit));
         List<Located> located = new ArrayList<>();
-        for (Document doc : collections.batches().aggregate(pipeline)) {
+        for (Document doc : collections.batches().aggregate(stalePipeline(states, olderThan, limit))) {
             located.add(new Located(
                     ExportBatch.fromDocument(doc), InboundFile.fromDocument(doc.get(FIELD, Document.class))));
         }
         return located;
+    }
+
+    /** The pipeline {@link #findStale} runs, shared with the test that explains it. */
+    static List<Bson> stalePipeline(Set<InboundFileState> states, Instant olderThan, int limit) {
+        List<String> names = states.stream().map(Enum::name).toList();
+        return List.of(
+                Aggregates.match(Filters.elemMatch(FIELD, stale("", names, olderThan))),
+                Aggregates.unwind("$" + FIELD),
+                Aggregates.match(stale(FIELD + ".", names, olderThan)),
+                Aggregates.sort(Sorts.ascending(FIELD + ".updatedAt", "_id", FIELD + ".uploadId")),
+                Aggregates.limit(limit));
+    }
+
+    /** In one of {@code names} and last written before {@code olderThan}, on fields under {@code prefix}. */
+    private static Bson stale(String prefix, List<String> names, Instant olderThan) {
+        return Filters.and(Filters.in(prefix + "state", names), Filters.lt(prefix + "updatedAt", olderThan));
     }
 
     /**
@@ -176,7 +188,8 @@ public class InboundFileRepository {
      * @param from the state the caller read
      * @param to the state to move to
      * @param now the write time, set as the entry's {@code updatedAt}
-     * @param entryUpdates further entry fields to set, on {@link #entry} paths, may be null
+     * @param entryUpdates further entry fields to set, on {@link #entry} paths, may be null; they
+     *     cannot override {@code state} or {@code updatedAt}
      * @return true when the entry was in {@code from} and is now in {@code to}; false when another
      *     writer moved it first (the caller treats this as a no-op). No edge is a self loop, so the
      *     write always modifies the entry it matches.
@@ -193,8 +206,9 @@ public class InboundFileRepository {
             throw new IllegalArgumentException("no transition " + from + " -> " + to + " for " + uploadId);
         }
         Bson base = Updates.combine(Updates.set(entry("state"), to.name()), Updates.set(entry("updatedAt"), now));
-        Bson update = entryUpdates == null ? base : Updates.combine(base, entryUpdates);
-        UpdateResult result = collections.batches().updateOne(session, entryIn(exportBatchId, uploadId, from), update);
+        UpdateResult result = collections
+                .batches()
+                .updateOne(session, entryIn(exportBatchId, uploadId, from), withBase(entryUpdates, base));
         return result.getModifiedCount() == 1;
     }
 
@@ -207,7 +221,8 @@ public class InboundFileRepository {
      * @param uploadId the entry
      * @param inState the state the caller read
      * @param now the write time, set as the entry's {@code updatedAt}
-     * @param entryUpdates the entry fields to set, on {@link #entry} paths, may be null
+     * @param entryUpdates the entry fields to set, on {@link #entry} paths, may be null; they cannot
+     *     override {@code updatedAt}
      * @return true when the entry was still in {@code inState}, even if the values were already there
      */
     public boolean updateInState(
@@ -218,9 +233,9 @@ public class InboundFileRepository {
             Instant now,
             Bson entryUpdates) {
         Bson base = Updates.set(entry("updatedAt"), now);
-        Bson update = entryUpdates == null ? base : Updates.combine(entryUpdates, base);
-        UpdateResult result =
-                collections.batches().updateOne(session, entryIn(exportBatchId, uploadId, inState), update);
+        UpdateResult result = collections
+                .batches()
+                .updateOne(session, entryIn(exportBatchId, uploadId, inState), withBase(entryUpdates, base));
         return result.getMatchedCount() == 1;
     }
 
@@ -233,11 +248,20 @@ public class InboundFileRepository {
         Map<String, Long> counts = new HashMap<>();
         collections
                 .batches()
-                .aggregate(List.of(
-                        Aggregates.unwind("$" + FIELD),
-                        Aggregates.group("$" + FIELD + ".state", Accumulators.sum("n", 1))))
+                .aggregate(countPipeline())
                 .forEach(doc -> counts.put(doc.getString("_id"), Documents.longValue(doc, "n")));
         return Map.copyOf(counts);
+    }
+
+    /**
+     * The pipeline {@link #countByState} runs, shared with the test that explains it. The first stage
+     * reads only batches with an entry, on {@code batches_inbound_upload_id}.
+     */
+    static List<Bson> countPipeline() {
+        return List.of(
+                Aggregates.match(Filters.exists(FIELD + ".uploadId")),
+                Aggregates.unwind("$" + FIELD),
+                Aggregates.group("$" + FIELD + ".state", Accumulators.sum("n", 1)));
     }
 
     /**
@@ -247,16 +271,31 @@ public class InboundFileRepository {
      * @return the oldest {@code updatedAt}, or empty when no entry is in {@code state}
      */
     public Optional<Instant> oldestUpdatedAtIn(InboundFileState state) {
-        Bson inState = Filters.eq(FIELD + ".state", state.name());
-        Document oldest = collections
-                .batches()
-                .aggregate(List.of(
-                        Aggregates.match(inState),
-                        Aggregates.unwind("$" + FIELD),
-                        Aggregates.match(inState),
-                        Aggregates.group(null, Accumulators.min("oldest", "$" + FIELD + ".updatedAt"))))
-                .first();
+        Document oldest = collections.batches().aggregate(oldestPipeline(state)).first();
         return Optional.ofNullable(oldest).map(doc -> Documents.instant(doc, "oldest"));
+    }
+
+    /**
+     * The pipeline {@link #oldestUpdatedAtIn} runs, shared with the test that explains it. The first
+     * stage reads only batches with an entry in the state, on {@code batches_inbound_state_updated}.
+     */
+    static List<Bson> oldestPipeline(InboundFileState state) {
+        Bson inState = Filters.eq(FIELD + ".state", state.name());
+        return List.of(
+                Aggregates.match(inState),
+                Aggregates.unwind("$" + FIELD),
+                Aggregates.match(inState),
+                Aggregates.group(null, Accumulators.min("oldest", "$" + FIELD + ".updatedAt")));
+    }
+
+    /**
+     * The caller's entry updates, then the repository's own. {@code Updates.combine} merges every
+     * {@code $set} into one document and a later field replaces an earlier one (checked against
+     * driver 5.6.4), so with the base last a caller's {@code entryUpdates} never override
+     * {@code state} or {@code updatedAt}.
+     */
+    private static Bson withBase(Bson entryUpdates, Bson base) {
+        return entryUpdates == null ? base : Updates.combine(entryUpdates, base);
     }
 
     /** The batch with the entry whose upload id and state match together; the positional {@code $} binds to it. */
