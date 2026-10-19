@@ -5,6 +5,8 @@ import com.certifyos.vendor_exchange.ingestion.inbound.InboundNames;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedOperations;
 import com.certifyos.vendor_exchange.ingestion.inbound.UnmatchedUpload;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Inbound files and unmatched uploads as operators read them: the documents minus internal job ids. */
@@ -40,7 +42,9 @@ public final class InboundViews {
             Instant updatedAt) {
 
         public InboundFileView {
-            dispositions = dispositions == null ? Map.of() : Map.copyOf(dispositions);
+            // Insertion order is kept, as InboundFile keeps it, so the view lists the design's order.
+            dispositions =
+                    dispositions == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(dispositions));
         }
 
         /** Builds the view. */
