@@ -105,7 +105,7 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
                 throw new IllegalStateException(
                         "service disabled; request ingestion " + request + " deferred to a retry");
             }
-            Optional<Located> loaded = support.loadExpecting(NAME, request.uploadId(), request.attempt(), EXPECTED);
+            Optional<Located> loaded = support.loadExpecting(NAME, request, EXPECTED);
             if (loaded.isEmpty()) {
                 return;
             }

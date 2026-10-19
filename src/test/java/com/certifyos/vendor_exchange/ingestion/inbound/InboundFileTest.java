@@ -4,8 +4,10 @@ import com.certifyos.vendor_exchange.ingestion.events.ArrivalEvent;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile.Checkpoint;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile.Parse;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundFile.Written;
+import com.certifyos.vendor_exchange.persistence.Ids;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.bson.Document;
@@ -186,6 +188,29 @@ class InboundFileTest {
 
         Assertions.assertEquals("vendor-sftp", entry.bucket());
         Assertions.assertEquals(OBJECT, entry.objectName());
+    }
+
+    @Test
+    void objectNameUndoesTheUploadIdEscape() {
+        String name = "to/org-xyz/Copy of results|v2.csv";
+        InboundFile entry = InboundFile.fromDocument(
+                new Document("uploadId", Ids.uploadId("vendor-sftp", name, "7")).append("state", "RECEIVED"));
+
+        Assertions.assertEquals("vendor-sftp", entry.bucket());
+        Assertions.assertEquals(name, entry.objectName());
+    }
+
+    @Test
+    void dispositionsKeepTheirInsertionOrder() {
+        InboundFile entry = stagedSample();
+
+        Assertions.assertEquals(
+                List.of("STAGED", "DUPLICATE", "SCHEMA_INVALID", "MISSING_IDS", "UNSUPPORTED_ENTITY"),
+                List.copyOf(entry.dispositions().keySet()));
+        Assertions.assertEquals(
+                List.copyOf(entry.dispositions().keySet()),
+                List.copyOf(
+                        entry.toDocument().get("dispositions", Document.class).keySet()));
     }
 
     /** {@code base} with its dispositions replaced; every other component is kept. */

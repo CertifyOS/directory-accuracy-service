@@ -61,11 +61,7 @@ class RequestIngestionJobTest {
 
         Assertions.assertTrue(deferred.getMessage().contains("disabled"), deferred.getMessage());
         Mockito.verify(support, Mockito.never())
-                .loadExpecting(
-                        ArgumentMatchers.any(),
-                        ArgumentMatchers.any(),
-                        ArgumentMatchers.anyInt(),
-                        ArgumentMatchers.any());
+                .loadExpecting(ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
         Mockito.verifyNoInteractions(archive, fileIngestion);
     }
 
@@ -86,8 +82,7 @@ class RequestIngestionJobTest {
         Located located = new Located(BATCH, entry);
         Mockito.when(support.loadExpecting(
                         ArgumentMatchers.eq(RequestIngestionJob.NAME),
-                        ArgumentMatchers.eq(UPLOAD_ID),
-                        ArgumentMatchers.eq(1),
+                        ArgumentMatchers.eq(new RequestIngestionJobRequest(BATCH.id(), UPLOAD_ID, 1)),
                         ArgumentMatchers.any()))
                 .thenReturn(Optional.of(located));
         InboundLifecycle lifecycle = Mockito.mock(InboundLifecycle.class);
