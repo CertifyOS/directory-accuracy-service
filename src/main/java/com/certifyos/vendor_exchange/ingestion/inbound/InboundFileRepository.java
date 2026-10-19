@@ -131,6 +131,25 @@ public class InboundFileRepository {
     }
 
     /**
+     * Every entry of a batch, in claim order, for the operator read. The array lives on the batch
+     * document, so its size is bounded by the uploads one batch received.
+     *
+     * @param exportBatchId the batch
+     * @return the entries, empty when the batch does not exist or has none
+     */
+    public List<InboundFile> entriesFor(String exportBatchId) {
+        Document batch = collections
+                .batches()
+                .find(Filters.eq("_id", exportBatchId))
+                .projection(Projections.include(FIELD))
+                .first();
+        if (batch == null) {
+            return List.of();
+        }
+        return entriesOf(batch).stream().map(InboundFile::fromDocument).toList();
+    }
+
+    /**
      * The entry for an upload id, for the storage event handler and operator reads, on the
      * {@code batches_inbound_upload_id} index.
      *

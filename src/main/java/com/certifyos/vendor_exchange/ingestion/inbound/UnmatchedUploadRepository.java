@@ -68,10 +68,14 @@ public class UnmatchedUploadRepository {
      * Lists open uploads, oldest first.
      *
      * @param folderTenant the folder tenant to list, null for every folder
-     * @param limit the most rows to return
+     * @param limit the most rows to return, at least 1
      * @return the open uploads, at most {@code limit}
+     * @throws IllegalArgumentException when {@code limit} is below 1: the driver reads 0 as no limit
      */
     public List<UnmatchedUpload> listOpen(String folderTenant, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1, got " + limit);
+        }
         Bson open = Filters.exists(RESOLUTION, false);
         Bson filter = folderTenant == null ? open : Filters.and(open, Filters.eq("folderTenant", folderTenant));
         List<UnmatchedUpload> found = new ArrayList<>();

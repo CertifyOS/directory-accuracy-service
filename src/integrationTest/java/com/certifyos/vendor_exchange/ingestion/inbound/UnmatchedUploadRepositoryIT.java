@@ -100,6 +100,10 @@ public class UnmatchedUploadRepositoryIT {
         Assertions.assertTrue(unmatched.listOpen(tenant("empty"), 10).isEmpty());
         Assertions.assertEquals(openBefore - 1, unmatched.countOpen(), "resolving one row lowers the open count");
         Assertions.assertTrue(unmatched.listOpen(null, 1000).size() >= 4, "no tenant lists every folder");
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> unmatched.listOpen(tenant, 0),
+                "0 would read as no limit in the driver, so it is refused");
     }
 
     private boolean insert(UnmatchedUpload upload) {
