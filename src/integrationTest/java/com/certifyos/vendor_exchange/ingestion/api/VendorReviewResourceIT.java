@@ -269,6 +269,23 @@ class VendorReviewResourceIT {
                 .then()
                 .statusCode(200)
                 .body("fields.id", Matchers.contains(ours.id()));
+        member().body("{\"action\":\"APPROVE\",\"version\":1}")
+                .post(BASE + "/fields/{id}/decision", theirs.id())
+                .then()
+                .statusCode(404)
+                .contentType(Problem.MEDIA_TYPE)
+                .body("code", Matchers.equalTo("FIELD_NOT_FOUND"));
+        member().body("{\"decisions\":[{\"id\":\"" + theirs.id() + "\",\"action\":\"REJECT\","
+                        + "\"comment\":\"not ours\",\"version\":1}]}")
+                .post(BASE + "/decisions")
+                .then()
+                .statusCode(207)
+                .body("results.status", Matchers.contains(404))
+                .body("results[0].code", Matchers.equalTo("FIELD_NOT_FOUND"));
+        FieldRecommendation untouched = repository.find(OTHER, theirs.id()).orElseThrow();
+        Assertions.assertEquals(
+                ReviewStatus.PENDING, untouched.reviewStatus(), "another tenant's write changed nothing");
+        Assertions.assertEquals(1L, untouched.version());
     }
 
     @Test

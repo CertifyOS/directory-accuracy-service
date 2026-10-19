@@ -1587,21 +1587,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
           content:
@@ -1671,21 +1656,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
           content:
@@ -1724,23 +1694,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Nothing of that id in the caller's tenant (BATCH_NOT_FOUND)
           content:
             application/problem+json:
               schema:
@@ -1777,23 +1738,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Nothing of that id in the caller's tenant (FIELD_NOT_FOUND)
           content:
             application/problem+json:
               schema:
@@ -1840,9 +1792,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
+          description: Nothing of that id in the caller's tenant (FIELD_NOT_FOUND)
           content:
             application/problem+json:
               schema:
@@ -1851,12 +1808,6 @@ paths:
           description: "The document's state does not allow the decision or its version\
             \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
             \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "503":
-          description: User lookup failed (DAL_UNAVAILABLE)
           content:
             application/problem+json:
               schema:
@@ -1894,23 +1845,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Nothing of that id in the caller's tenant (FIELD_NOT_FOUND)
           content:
             application/problem+json:
               schema:
@@ -1952,23 +1894,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Nothing of that id in the caller's tenant (PRACTITIONER_NOT_FOUND)
           content:
             application/problem+json:
               schema:
@@ -2010,23 +1943,14 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-        "404":
-          description: "Nothing of that id in the caller's tenant (FIELD_NOT_FOUND,\
-            \ PRACTITIONER_NOT_FOUND, BATCH_NOT_FOUND)"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "409":
-          description: "The document's state does not allow the decision or its version\
-            \ moved (DECISION_CONFLICT); the detail is JSON of id, reviewStatus, version\
-            \ and lastDecisionBy"
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
         "503":
           description: User lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Nothing of that id in the caller's tenant (PRACTITIONER_NOT_FOUND)
           content:
             application/problem+json:
               schema:
