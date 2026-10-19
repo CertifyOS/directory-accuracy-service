@@ -85,6 +85,17 @@ public class InboundJobSupport {
     }
 
     /**
+     * Reads an entry again, for a job that needs what its own earlier writes stored (the stage job's
+     * totals after its last checkpoint). No log line and no state check.
+     *
+     * @param located the entry as the job read it
+     * @return the entry as stored now, or empty when it is gone
+     */
+    public Optional<Located> reload(Located located) {
+        return inbound.findByUploadId(located.entry().uploadId());
+    }
+
+    /**
      * How many times the running job has run, this run included: JobRunr's failure count plus one.
      *
      * @param job JobRunr's context, null or {@code JobContext.Null} when the handler is called

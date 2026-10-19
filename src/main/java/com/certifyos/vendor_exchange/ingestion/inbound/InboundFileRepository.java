@@ -252,6 +252,37 @@ public class InboundFileRepository {
     }
 
     /**
+     * The row checkpoint's compare-and-set: updates entry fields while the entry is still in {@code
+     * inState} and its {@code checkpoint.after} is still {@code expectedAfter}, so of two runs that
+     * stage the same chunk only the first adds its counts.
+     *
+     * @param session the transaction
+     * @param exportBatchId the batch
+     * @param uploadId the entry
+     * @param inState the state the caller read
+     * @param expectedAfter the cursor the chunk resumed from, null for the first chunk
+     * @param now the write time, set as the entry's {@code updatedAt}
+     * @param entryUpdates the entry fields to set, on {@link #entry} paths; they cannot override
+     *     {@code updatedAt}
+     * @return true when the entry was still in {@code inState} at {@code expectedAfter}
+     */
+    public boolean updateInStateAt(
+            ClientSession session,
+            String exportBatchId,
+            String uploadId,
+            InboundFileState inState,
+            String expectedAfter,
+            Instant now,
+            Bson entryUpdates) {
+        Bson base = Updates.set(entry("updatedAt"), now);
+        Bson at = Filters.eq("checkpoint.after", expectedAfter);
+        UpdateResult result = collections
+                .batches()
+                .updateOne(session, entryIn(exportBatchId, uploadId, inState, at), withBase(entryUpdates, base));
+        return result.getMatchedCount() == 1;
+    }
+
+    /**
      * Updates entry fields without changing the state, guarded on the state the caller read (for
      * progress such as the job id or the row checkpoint).
      *
@@ -339,10 +370,14 @@ public class InboundFileRepository {
 
     /** The batch with the entry whose upload id and state match together; the positional {@code $} binds to it. */
     private static Bson entryIn(String exportBatchId, String uploadId, InboundFileState state) {
+        return entryIn(exportBatchId, uploadId, state, null);
+    }
+
+    private static Bson entryIn(String exportBatchId, String uploadId, InboundFileState state, Bson condition) {
+        Bson element = Filters.and(Filters.eq("uploadId", uploadId), Filters.eq("state", state.name()));
         return Filters.and(
                 Filters.eq("_id", exportBatchId),
-                Filters.elemMatch(
-                        FIELD, Filters.and(Filters.eq("uploadId", uploadId), Filters.eq("state", state.name()))));
+                Filters.elemMatch(FIELD, condition == null ? element : Filters.and(element, condition)));
     }
 
     private Optional<Located> locate(Bson filter, Predicate<Document> wanted) {

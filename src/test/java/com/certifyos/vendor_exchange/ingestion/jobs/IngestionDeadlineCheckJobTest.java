@@ -2,6 +2,7 @@ package com.certifyos.vendor_exchange.ingestion.jobs;
 
 import com.certifyos.vendor_exchange.clients.FileIngestionClient;
 import com.certifyos.vendor_exchange.ingestion.inbound.InboundLifecycle;
+import com.certifyos.vendor_exchange.ingestion.staging.StagingLifecycle;
 import java.time.Clock;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,12 @@ class IngestionDeadlineCheckJobTest {
         Mockito.when(support.enabled()).thenReturn(false);
         FileIngestionClient fileIngestion = Mockito.mock(FileIngestionClient.class);
         IngestionDeadlineCheckJob job = new IngestionDeadlineCheckJob(
-                support, Mockito.mock(InboundLifecycle.class), fileIngestion, Clock.systemUTC());
+                support,
+                Mockito.mock(InboundLifecycle.class),
+                Mockito.mock(StagingLifecycle.class),
+                fileIngestion,
+                Mockito.mock(IngestionJobEnqueuer.class),
+                Clock.systemUTC());
 
         IllegalStateException deferred = Assertions.assertThrows(
                 IllegalStateException.class,
