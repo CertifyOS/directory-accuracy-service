@@ -102,6 +102,17 @@ class IdsTest {
     }
 
     @Test
+    void rejectedValueMayContainAPipeBecauseItIsHashed() throws Exception {
+        String value = "5351 S ROSLYN ST STE 200|GREENWOOD VILLAGE|CO|80111";
+        String expected = java.util.HexFormat.of()
+                .formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        Assertions.assertEquals(
+                "org-xyz|cert-000123|loc-7781|location|" + expected,
+                Ids.rejectedValueId("org-xyz", "cert-000123", "loc-7781", "location", value));
+    }
+
+    @Test
     void releaseIdIsVersionSevenPrefixed() {
         String id = Ids.releaseId();
         Assertions.assertTrue(id.startsWith("rel-"));
@@ -119,6 +130,8 @@ class IdsTest {
         Assertions.assertThrows(
                 IllegalArgumentException.class, () -> Ids.fieldRecommendationId("t", "s", "b", "p", "", "phone"));
         Assertions.assertThrows(
-                IllegalArgumentException.class, () -> Ids.rejectedValueId("t", "p", null, "phone", "a|b"));
+                IllegalArgumentException.class, () -> Ids.rejectedValueId("t|x", "p", null, "phone", "value"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.rejectedValueId("t", "p", null, "phone", " "));
     }
 }

@@ -167,7 +167,9 @@ public final class Ids {
 
     /**
      * Rejected value id: four readable legs, then the SHA-256 of the normalised value, so the raw
-     * value never appears in an id or a log line.
+     * value never appears in an id or a log line. The four readable legs are refused when null,
+     * blank or containing {@code |}. The normalised value is refused only when null or blank; it
+     * may contain {@code |} (a location composite, a specialty list) because it is hashed.
      *
      * @param tenantId the tenant
      * @param certifyPractitionerId the practitioner
@@ -187,7 +189,7 @@ public final class Ids {
                 leg("certifyPractitionerId", certifyPractitionerId),
                 optionalLeg("certifyLocationId", certifyLocationId),
                 leg("field", field),
-                sha256Hex(leg("normalizedValue", normalizedValue)));
+                sha256Hex(requireValue(normalizedValue)));
     }
 
     private static String join(String... legs) {
@@ -204,6 +206,13 @@ public final class Ids {
         }
         if (value.indexOf('|') >= 0) {
             throw new IllegalArgumentException(name + " must not contain '|'");
+        }
+        return value;
+    }
+
+    private static String requireValue(String value) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("normalizedValue must not be null or blank");
         }
         return value;
     }
