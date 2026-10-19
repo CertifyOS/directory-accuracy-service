@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -175,9 +176,11 @@ public class FieldRecommendationRepository {
             int separator = query.after().indexOf(CURSOR_SEPARATOR);
             Instant stagedAt = cursorTime(query.after(), separator);
             String id = query.after().substring(separator + 1);
-            clauses.add(Filters.or(
-                    Filters.lt("stagedAt", stagedAt),
-                    Filters.and(Filters.eq("stagedAt", stagedAt), Filters.lt("_id", id))));
+            // stagedAt < t OR (stagedAt == t AND _id < id), written as stagedAt <= t AND (stagedAt < t OR
+            // _id < id). The planner turns the top-level range into index bounds but evaluates an $or
+            // after the fetch, so without the range every page would re-scan every newer row.
+            clauses.add(Filters.lte("stagedAt", stagedAt));
+            clauses.add(Filters.or(Filters.lt("stagedAt", stagedAt), Filters.lt("_id", id)));
         }
         return Filters.and(clauses);
     }
@@ -259,6 +262,7 @@ public class FieldRecommendationRepository {
 
     private List<FieldRecommendation> forKey(
             String tenantId, String path, String value, String exportBatchId, int limit) {
+        requireLimit(limit);
         Bson owner = Filters.and(Filters.eq("tenantId", tenantId), Filters.eq(path, value));
         String batch = exportBatchId;
         if (batch == null) {
@@ -285,6 +289,7 @@ public class FieldRecommendationRepository {
      * @return the documents by id
      */
     public List<FieldRecommendation> forRelease(String tenantId, String releaseId, int limit) {
+        requireLimit(limit);
         return read(
                 Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("goldenRecordUpdate.releaseId", releaseId)),
                 limit);
@@ -303,10 +308,12 @@ public class FieldRecommendationRepository {
      * @param expectedVersion the version the caller read
      * @param from the states the decision may start from
      * @param to the state to move to
-     * @param updates further updates, may be null
+     * @param updates further updates, required: at least the {@code $push} of the decision's history
+     *     entry, so no decision is recorded without one
      * @param now the write time
      * @return true when the document matched and moved; false when another writer moved it first, the
      *     version is stale, or the document is another tenant's
+     * @throws NullPointerException when {@code updates} is null
      */
     public boolean decide(
             ClientSession session,
@@ -317,6 +324,7 @@ public class FieldRecommendationRepository {
             ReviewStatus to,
             Bson updates,
             Instant now) {
+        Objects.requireNonNull(updates, "a decision needs updates that push its HistoryEntry onto reviewHistory");
         Bson filter = Filters.and(
                 Filters.eq("_id", id),
                 Filters.eq("tenantId", tenantId),
@@ -338,7 +346,8 @@ public class FieldRecommendationRepository {
      * @param releaseId {@code goldenRecordUpdate.releaseId}
      * @param from the state the documents must be in
      * @param to the state to move to
-     * @param updates further updates, may be null; same rules as {@link #decide}
+     * @param updates further updates, may be null; the {@code $set} and {@code version} rules of
+     *     {@link #decide} apply
      * @param now the write time
      * @return how many documents moved
      */
@@ -417,6 +426,13 @@ public class FieldRecommendationRepository {
                 .limit(1)
                 .first();
         return Optional.ofNullable(oldest).map(doc -> Documents.instant(doc, "stagedAt"));
+    }
+
+    /** A limit of 0 reads without a bound in MongoDB; every list read needs a real one. */
+    private static void requireLimit(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1, got " + limit);
+        }
     }
 
     private List<FieldRecommendation> read(Bson filter, int limit) {

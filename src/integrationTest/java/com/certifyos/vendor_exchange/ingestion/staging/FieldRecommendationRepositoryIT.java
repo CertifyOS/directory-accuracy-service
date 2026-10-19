@@ -12,6 +12,7 @@ import com.certifyos.vendor_exchange.ingestion.staging.FieldRecommendationReposi
 import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Ids;
 import com.certifyos.vendor_exchange.persistence.Transactions;
+import com.mongodb.ExplainVerbosity;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import io.quarkus.test.common.QuarkusTestResource;
@@ -27,6 +28,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -40,9 +42,11 @@ import org.junit.jupiter.api.Test;
 @TestProfile(ApiTestProfile.class)
 public class FieldRecommendationRepositoryIT {
 
+    private static final Logger LOG = Logger.getLogger(FieldRecommendationRepositoryIT.class);
     private static final Instant STAGED = Instant.parse("2026-10-15T09:15:10Z");
     private static final String SHEET = "Physicians Directory Accuracy";
     private static final Pattern INDEX_NAME = Pattern.compile("\"indexName\": \"([^\"]+)\"");
+    private static final Pattern BLOCKING_SORT = Pattern.compile("\"stage\": \"SORT\"");
 
     @Inject
     FieldRecommendationRepository repository;
@@ -161,32 +165,57 @@ public class FieldRecommendationRepositoryIT {
                 () -> repository.list(new ListQuery(tenant, "phone", ReviewStatus.open(), null, null, "nope", 3)));
     }
 
+    /**
+     * The list reads {@code field_recs_open_list} with the sort served by the index: the {@code $in}
+     * on {@code reviewStatus} sits ahead of the sort keys, so two statuses need a {@code SORT_MERGE} of
+     * one index scan per status, never a blocking {@code SORT}. Ten phone rows (half {@code SKIPPED})
+     * and thirty rows of other fields make an unbounded or field-blind scan visible in the key count:
+     * a page examines at most {@code limit + 1} keys plus one look-ahead per status.
+     */
     @Test
     void listUsesThePartialIndex() {
         String tenant = "frrepo-explain";
         String batch = batchId(tenant, 10);
         List<FieldRecommendation> docs = new ArrayList<>();
         for (String field : List.of("phone", "fax", "practice_name", "location")) {
-            for (int index = 1; index <= 3; index++) {
+            for (int index = 1; index <= 10; index++) {
                 docs.add(recommendation(
                         tenant,
                         batch,
                         "cert-" + index,
-                        "100000000" + index,
+                        "10000000" + (10 + index),
                         "loc-" + index,
                         field,
                         STAGED.plusSeconds(index)));
             }
         }
         repository.upsertAll(docs);
-        ListQuery query = new ListQuery(tenant, "phone", ReviewStatus.open(), null, null, null, 3);
-        ListQuery next = after(query, page(repository.list(query), 3).subList(0, 1));
+        for (FieldRecommendation doc : docs.subList(0, 10)) {
+            if (doc.stagedAt().getEpochSecond() % 2 == 1) {
+                collections
+                        .fieldRecommendations()
+                        .updateOne(
+                                Filters.eq("_id", doc.id()), Updates.set("reviewStatus", ReviewStatus.SKIPPED.name()));
+            }
+        }
 
-        Assertions.assertEquals(Set.of("field_recs_open_list"), indexesOf(query));
-        Assertions.assertEquals(Set.of("field_recs_open_list"), indexesOf(next), "the keyset page too");
-        Assertions.assertEquals(
-                Set.of("field_recs_open_list_any_field"),
-                indexesOf(new ListQuery(tenant, null, ReviewStatus.open(), null, null, null, 3)));
+        for (Set<ReviewStatus> statuses : List.of(ReviewStatus.open(), Set.of(ReviewStatus.PENDING))) {
+            ListQuery first = new ListQuery(tenant, "phone", statuses, null, null, null, 3);
+            ListQuery next = after(first, page(repository.list(first), 3));
+            for (ListQuery query : List.of(first, next)) {
+                Plan plan = planOf(query);
+                String label = statuses + (query.after() == null ? " first page" : " keyset page");
+                LOG.infof("%s: %d keys examined", label, plan.keysExamined());
+                Assertions.assertEquals(Set.of("field_recs_open_list"), plan.indexes(), label + " " + plan.json());
+                Assertions.assertFalse(plan.blockingSort(), label + " sorts in memory: " + plan.json());
+                Assertions.assertTrue(
+                        plan.keysExamined() <= query.limit() + 1 + statuses.size(),
+                        label + " examined " + plan.keysExamined() + " keys: " + plan.json());
+            }
+        }
+        Plan anyField = planOf(new ListQuery(tenant, null, ReviewStatus.open(), null, null, null, 3));
+        Assertions.assertEquals(Set.of("field_recs_open_list_any_field"), anyField.indexes(), anyField.json());
+        Assertions.assertFalse(anyField.blockingSort(), anyField.json());
     }
 
     @Test
@@ -225,8 +254,10 @@ public class FieldRecommendationRepositoryIT {
         repository.upsertAll(List.of(doc));
         Instant decidedAt = STAGED.plusSeconds(30);
 
+        Bson approve = history("APPROVE", decidedAt);
+
         boolean staleVersion = transactions.run(session -> repository.decide(
-                session, tenant, doc.id(), 2L, ReviewStatus.open(), ReviewStatus.APPROVED, null, decidedAt));
+                session, tenant, doc.id(), 2L, ReviewStatus.open(), ReviewStatus.APPROVED, approve, decidedAt));
         boolean wrongStatus = transactions.run(session -> repository.decide(
                 session,
                 tenant,
@@ -234,10 +265,15 @@ public class FieldRecommendationRepositoryIT {
                 1L,
                 Set.of(ReviewStatus.APPROVED),
                 ReviewStatus.RELEASE_REQUESTED,
-                null,
+                approve,
                 decidedAt));
         boolean otherTenant = transactions.run(session -> repository.decide(
-                session, "frrepo-other", doc.id(), 1L, ReviewStatus.open(), ReviewStatus.APPROVED, null, decidedAt));
+                session, "frrepo-other", doc.id(), 1L, ReviewStatus.open(), ReviewStatus.APPROVED, approve, decidedAt));
+        Assertions.assertThrows(
+                NullPointerException.class,
+                () -> transactions.run(session -> repository.decide(
+                        session, tenant, doc.id(), 1L, ReviewStatus.open(), ReviewStatus.APPROVED, null, decidedAt)),
+                "a decision without its history push is refused");
         boolean approved = transactions.run(session -> repository.decide(
                 session,
                 tenant,
@@ -249,7 +285,7 @@ public class FieldRecommendationRepositoryIT {
                         history("APPROVE", decidedAt), Updates.set("reviewStatus", ReviewStatus.RELEASED.name())),
                 decidedAt));
         boolean replayed = transactions.run(session -> repository.decide(
-                session, tenant, doc.id(), 1L, ReviewStatus.open(), ReviewStatus.APPROVED, null, decidedAt));
+                session, tenant, doc.id(), 1L, ReviewStatus.open(), ReviewStatus.APPROVED, approve, decidedAt));
 
         Assertions.assertFalse(staleVersion);
         Assertions.assertFalse(wrongStatus);
@@ -286,6 +322,12 @@ public class FieldRecommendationRepositoryIT {
         Assertions.assertEquals(List.of(october), batchesOf(repository.forPractitioner(tenant, "cert-1", null, 10)));
         Assertions.assertEquals(
                 List.of(september, september), batchesOf(repository.forPractitioner(tenant, "cert-1", september, 10)));
+        Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> repository.forNpi(tenant, "1000000001", null, 0),
+                "0 is unbounded");
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> repository.forPractitioner(tenant, "cert-1", september, 0));
     }
 
     /**
@@ -372,6 +414,7 @@ public class FieldRecommendationRepositoryIT {
         Assertions.assertEquals("rel-a", claimed.goldenRecordUpdate().releaseId());
         Assertions.assertEquals(requestedAt.plusSeconds(1), claimed.updatedAt());
         Assertions.assertEquals(List.of(), repository.forRelease("frrepo-other", "rel-a", 10));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> repository.forRelease(tenant, "rel-a", 0));
 
         Map<String, Long> after = repository.countByStatus();
         Assertions.assertEquals(3L, after.get("RELEASING") - before.getOrDefault("RELEASING", 0L));
@@ -421,21 +464,32 @@ public class FieldRecommendationRepositoryIT {
         return Updates.push("reviewHistory", new HistoryEntry(action, "reviewer@example.com", at, null).toDocument());
     }
 
-    /** Every index the winning plan of {@code query}'s find names. */
-    private Set<String> indexesOf(ListQuery query) {
+    /**
+     * What the winning plan of a list read does.
+     *
+     * @param indexes every index the plan names
+     * @param blockingSort whether a {@code SORT} stage sorts in memory ({@code SORT_MERGE} does not count)
+     * @param keysExamined index keys the run examined
+     * @param json the winning plan, for failure messages
+     */
+    private record Plan(Set<String> indexes, boolean blockingSort, long keysExamined, String json) {}
+
+    /** Explains {@code query}'s find as {@link FieldRecommendationRepository#list} runs it, with execution stats. */
+    private Plan planOf(ListQuery query) {
         Document explain = collections
                 .fieldRecommendations()
                 .find(FieldRecommendationRepository.listFilter(query))
                 .sort(FieldRecommendationRepository.LIST_SORT)
                 .limit(query.limit() + 1)
-                .explain();
+                .explain(ExplainVerbosity.EXECUTION_STATS);
         String plan = explain.get("queryPlanner", Document.class)
                 .get("winningPlan", Document.class)
                 .toJson();
         Set<String> names = new HashSet<>();
         INDEX_NAME.matcher(plan).results().forEach(match -> names.add(match.group(1)));
         Assertions.assertFalse(names.isEmpty(), plan);
-        return names;
+        Number keys = explain.get("executionStats", Document.class).get("totalKeysExamined", Number.class);
+        return new Plan(names, BLOCKING_SORT.matcher(plan).find(), keys.longValue(), plan);
     }
 
     private static List<String> batchesOf(List<FieldRecommendation> docs) {

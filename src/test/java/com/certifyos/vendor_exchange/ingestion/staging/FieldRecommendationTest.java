@@ -172,6 +172,25 @@ class FieldRecommendationTest {
     }
 
     @Test
+    void evidenceNumbersBeyondLongStayEncodable() {
+        Map<String, FileIngestionCell> overrides = Map.of(
+                CandorRecsMapping.column("practice_name", CandorRecsMapping.Suffix.EVIDENCE),
+                DesignRows.valid("[{\"reason\":\"direct_outreach\",\"value\":1234567890123456789012345,"
+                        + "\"score\":0.5,\"nested\":[98765432109876543210987]}]"));
+        WideRow row = WideRow.from(DesignRows.row("VALID", overrides));
+
+        FieldRecommendation recommendation = FieldRecommendation.pending(
+                row, row.cells().get("practice_name"), DesignRows.batch(), DesignRows.entry(), MAPPER, NOW);
+
+        Map<String, Object> evidence = recommendation.vendorEvidence().get(0);
+        Assertions.assertEquals("1234567890123456789012345", evidence.get("value"), "kept as its text");
+        Assertions.assertEquals(List.of("98765432109876543210987"), evidence.get("nested"));
+        Assertions.assertEquals(0.5, evidence.get("score"), "a number BSON can encode stays a number");
+        Assertions.assertEquals(
+                recommendation, FieldRecommendation.fromDocument(throughBson(recommendation.toDocument())));
+    }
+
+    @Test
     void unknownReviewStatusIsRefusedOnRead() {
         Document doc = pending("phone").toDocument().append("reviewStatus", "PARKED");
 

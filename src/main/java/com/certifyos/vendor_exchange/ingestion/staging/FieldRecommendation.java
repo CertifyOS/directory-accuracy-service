@@ -7,6 +7,8 @@ import com.certifyos.vendor_exchange.persistence.Ids;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -426,7 +428,15 @@ public record FieldRecommendation(
         return Collections.unmodifiableMap(copy);
     }
 
+    /**
+     * A plain copy of one evidence value. A number Jackson parsed as {@link BigInteger} (beyond a long)
+     * or {@link BigDecimal} has no BSON codec and would fail the whole bulk write, so it is kept as its
+     * text.
+     */
     private static Object plain(Object value) {
+        if (value instanceof BigInteger || value instanceof BigDecimal) {
+            return value.toString();
+        }
         if (value instanceof Map<?, ?> map) {
             return plainMap(map);
         }
