@@ -172,7 +172,7 @@ public class MongoIndexes {
         collections
                 .reviewEvents()
                 .createIndex(
-                        Indexes.ascending("tenantId", "releaseId"),
+                        Indexes.ascending("tenantId", "releaseId", "_id"),
                         new IndexOptions()
                                 .name("review_events_by_release")
                                 .partialFilterExpression(Filters.exists("releaseId")));

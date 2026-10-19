@@ -10,6 +10,7 @@ import com.mongodb.client.model.Sorts;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
@@ -41,6 +42,12 @@ public class AuditRepository {
             "action",
             "writePath");
 
+    /**
+     * An alert value reaches the line only as one token: letters, digits and {@code _ . : / -}, at
+     * most 64 characters. Free text (an exception message as an outcome) stays in the stored detail.
+     */
+    private static final Pattern TOKEN = Pattern.compile("^[A-Za-z0-9_.:/-]{1,64}$");
+
     private static final Logger AUDIT = Logger.getLogger(AUDIT_LOGGER);
 
     private final Collections collections;
@@ -53,8 +60,8 @@ public class AuditRepository {
      * The one line per audit event, after the write: {@code AUDIT type=... tenantId=... vendor=...
      * exportBatchId=... attempt=... actor=...}, then the ingestion ids the event carries ({@code
      * uploadId}, {@code fieldRecommendationId}, {@code certifyPractitionerId}, {@code releaseId}),
-     * then the alert keys the event carries. Ids and enumerations only, never an NPI or a field
-     * value.
+     * then the alert keys the event carries whose value is a single token. Ids and enumerations
+     * only, never an NPI, a field value or free text.
      *
      * @param event the event written
      * @return the line
@@ -71,7 +78,10 @@ public class AuditRepository {
         appendWhenSet(out, "certifyPractitionerId", event.certifyPractitionerId());
         appendWhenSet(out, "releaseId", event.releaseId());
         for (String key : ALERT_KEYS) {
-            appendWhenSet(out, key, event.detail().get(key));
+            Object value = event.detail().get(key);
+            if (value != null && TOKEN.matcher(value.toString()).matches()) {
+                appendWhenSet(out, key, value);
+            }
         }
         return out.toString();
     }

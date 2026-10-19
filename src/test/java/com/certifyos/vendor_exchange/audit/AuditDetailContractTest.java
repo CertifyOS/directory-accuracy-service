@@ -137,6 +137,7 @@ class AuditDetailContractTest {
     @Test
     void theAuditLineCarriesTheIngestionIdsAndTheNewAlertKeysOnly() {
         AuditEvent event = AuditEvent.of(AuditEventType.FIELD_RELEASED, "org-1", "candor")
+                .actor(Actors.INGESTION)
                 .batch("org-1-candor-2026-10-001")
                 .upload("vendor-sftp|to/org-1/f.csv|1760520000123456")
                 .field("org-1|candor|org-1-candor-2026-10-001|cert-1|loc-1|phone", "cert-1")
@@ -153,10 +154,41 @@ class AuditDetailContractTest {
         String line = AuditRepository.line(event);
         Assertions.assertEquals(
                 "AUDIT type=FIELD_RELEASED tenantId=org-1 vendor=candor exportBatchId=org-1-candor-2026-10-001 "
-                        + "attempt=null actor=system:vendor-export uploadId=vendor-sftp|to/org-1/f.csv|1760520000123456 "
+                        + "attempt=null actor=system:vendor-ingestion uploadId=vendor-sftp|to/org-1/f.csv|1760520000123456 "
                         + "fieldRecommendationId=org-1|candor|org-1-candor-2026-10-001|cert-1|loc-1|phone "
                         + "certifyPractitionerId=cert-1 releaseId=rel-1 completionSource=EVENT outcome=WON writePath=SLICE",
                 line);
         Assertions.assertFalse(line.contains("comment"), "free text never reaches the line");
+    }
+
+    @Test
+    void theAuditLineEchoesAnAlertValueOnlyWhenItIsOneToken() {
+        // A deadline check that could not reach egress records the exception text as the outcome.
+        AuditEvent unreachable = cancelled("unreachable: connection refused by egress");
+        String freeText = AuditRepository.line(unreachable);
+        Assertions.assertFalse(freeText.contains("outcome="), freeText);
+        Assertions.assertFalse(freeText.contains("connection refused"), freeText);
+        Assertions.assertEquals(
+                "unreachable: connection refused by egress",
+                unreachable.detail().get("outcome"),
+                "the value stays in the stored detail");
+
+        Assertions.assertTrue(
+                AuditRepository.line(cancelled("CANCELLED")).endsWith(" outcome=CANCELLED"),
+                AuditRepository.line(cancelled("CANCELLED")));
+        Assertions.assertFalse(AuditRepository.line(cancelled("x".repeat(65))).contains("outcome="), "longer than 64");
+        Assertions.assertTrue(AuditRepository.line(cancelled("x".repeat(64))).contains("outcome="), "64 is allowed");
+        Assertions.assertFalse(AuditRepository.line(cancelled("a=b")).contains("outcome="), "no key=value inside");
+        Assertions.assertTrue(
+                AuditRepository.line(cancelled("gs://bucket/a-b_c.1:2")).endsWith(" outcome=gs://bucket/a-b_c.1:2"),
+                "letters, digits and _ . : / - are one token");
+    }
+
+    private static AuditEvent cancelled(String outcome) {
+        return AuditEvent.forBatch(
+                        AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCELLED, "org-1", "candor", "org-1-candor-2026-10-001", 2)
+                .detail("cancelledCorrelationId", "corr-1")
+                .detail("outcome", outcome)
+                .build();
     }
 }

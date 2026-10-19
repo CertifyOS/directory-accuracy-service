@@ -15,7 +15,8 @@ import java.util.function.Supplier;
 /**
  * The metrics from the export and ingestion designs' Observability sections, one method per name.
  * Tags are the designs' (tenant, vendor, state, reason, source, job, and for ingestion also event
- * type, result, status, disposition, action and outcome), never a practitioner. Telemetry is best
+ * type, result, status, disposition, action and outcome), never a practitioner, an NPI, a location
+ * or a field value. Telemetry is best
  * effort: nothing here throws into a caller's transaction. Names use dots; the Prometheus endpoint
  * renders them with underscores ({@code vendor_export_tick_duration_seconds}).
  */

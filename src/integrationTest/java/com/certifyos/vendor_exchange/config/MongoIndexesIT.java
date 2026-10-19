@@ -171,7 +171,10 @@ public class MongoIndexesIT {
 
         Map<String, Document> reviewEvents = byName(collections.reviewEvents());
         assertKey(reviewEvents, "review_events_by_field", new Document("fieldRecommendationId", 1).append("_id", 1));
-        assertKey(reviewEvents, "review_events_by_release", new Document("tenantId", 1).append("releaseId", 1));
+        assertKey(
+                reviewEvents,
+                "review_events_by_release",
+                new Document("tenantId", 1).append("releaseId", 1).append("_id", 1));
         Assertions.assertEquals(
                 new Document("releaseId", new Document("$exists", true)),
                 reviewEvents.get("review_events_by_release").get("partialFilterExpression", Document.class));
