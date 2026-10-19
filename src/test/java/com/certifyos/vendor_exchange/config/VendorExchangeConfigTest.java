@@ -165,6 +165,17 @@ class VendorExchangeConfigTest {
     }
 
     @Test
+    void fileIngestionSwapInKeysAreAbsentWhenEmpty() {
+        Map<String, String> values = required();
+        values.put("vendor-exchange.file-ingestion.mapping-id", "");
+        values.put("vendor-exchange.file-ingestion.iap-audience", "");
+        VendorExchangeConfig cfg = load(values);
+
+        Assertions.assertTrue(cfg.fileIngestion().mappingId().isEmpty(), "empty string must read as absent");
+        Assertions.assertTrue(cfg.fileIngestion().iapAudience().isEmpty(), "empty string must read as absent");
+    }
+
+    @Test
     void fileIngestionSwapInKeysAreReadWhenSet() {
         Map<String, String> values = required();
         values.put("vendor-exchange.file-ingestion.mapping-id", "map-1");

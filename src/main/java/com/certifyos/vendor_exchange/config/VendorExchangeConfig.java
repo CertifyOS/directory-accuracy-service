@@ -104,7 +104,7 @@ public interface VendorExchangeConfig {
         /** Bucket the received vendor file is archived in before and after processing. */
         String archiveBucket();
 
-        /** How long after the file arrives ingestion may run before it is alerted and failed. */
+        /** Hours ingestion of one inbound file may take before the deadline check applies. */
         @WithDefault("6")
         int ingestionDeadlineHours();
 
@@ -128,7 +128,7 @@ public interface VendorExchangeConfig {
         @WithDefault("5000")
         int releaseBulkMax();
 
-        /** Age after which an untouched inbound file is re-enqueued and alerted. */
+        /** Minutes without progress after which an inbound file counts as stale. */
         @WithDefault("30")
         int inboundStaleMinutes();
 
@@ -145,7 +145,7 @@ public interface VendorExchangeConfig {
         /** Base URL of file-ingestion-service. */
         String url();
 
-        /** Consumer identifier sent with each request so file-ingestion-service can tell this caller apart. */
+        /** Name this service identifies itself with to file-ingestion-service. */
         @WithDefault("vendor-ingestion")
         String consumerIdentifier();
 
