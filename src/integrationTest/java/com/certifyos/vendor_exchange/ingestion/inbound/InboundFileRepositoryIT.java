@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Assertions;
@@ -239,14 +240,41 @@ public class InboundFileRepositoryIT {
                         .uploadId());
         Assertions.assertTrue(inbound.findByExternalRef("inrepo-nobody|1").isEmpty());
 
-        Document explain = collections
-                .batches()
-                .find(InboundFileRepository.byExternalRef(secondRef))
-                .explain();
-        String winningPlan = explain.get("queryPlanner", Document.class)
+        String plan = winningPlan(InboundFileRepository.byExternalRef(secondRef));
+        Assertions.assertTrue(plan.contains("batches_inbound_external_ref"), plan);
+    }
+
+    @Test
+    void findByUploadIdUsesTheIndex() {
+        InboundFixtures.Seeded seeded = InboundFixtures.deliveredBatchWithEntry(
+                transactions, batches, collections, "inrepo-upload", InboundFileState.RECEIVED);
+        String batchId = seeded.batch().id();
+        Document second =
+                entryDoc("inrepo-upload", batchId, InboundFileState.DUPLICATE_LOGGED, "8002", NOW.minusSeconds(60));
+        String secondUpload = second.getString("uploadId");
+        collections.batches().updateOne(Filters.eq("_id", batchId), Updates.push("inboundFiles", second));
+
+        Located located = inbound.findByUploadId(secondUpload).orElseThrow();
+        Assertions.assertEquals(batchId, located.batch().id());
+        Assertions.assertEquals(
+                InboundFileState.DUPLICATE_LOGGED, located.entry().state());
+        Assertions.assertEquals(
+                InboundFileState.RECEIVED,
+                inbound.findByUploadId(seeded.entry().uploadId())
+                        .orElseThrow()
+                        .entry()
+                        .state());
+
+        String plan = winningPlan(InboundFileRepository.byUploadId(secondUpload));
+        Assertions.assertTrue(plan.contains("batches_inbound_upload_id"), plan);
+    }
+
+    /** The winning plan of a find on the batches collection, as JSON (classic and SBE shapes both name the index). */
+    private String winningPlan(Bson filter) {
+        Document explain = collections.batches().find(filter).explain();
+        return explain.get("queryPlanner", Document.class)
                 .get("winningPlan", Document.class)
                 .toJson();
-        Assertions.assertTrue(winningPlan.contains("batches_inbound_external_ref"), winningPlan);
     }
 
     /**

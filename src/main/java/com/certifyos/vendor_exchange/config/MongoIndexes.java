@@ -105,6 +105,14 @@ public class MongoIndexes {
                         new IndexOptions()
                                 .name("batches_inbound_external_ref")
                                 .partialFilterExpression(Filters.exists("inboundFiles.externalRef")));
+        // batches: a redelivered storage event finds its entry by upload id
+        collections
+                .batches()
+                .createIndex(
+                        Indexes.ascending("inboundFiles.uploadId"),
+                        new IndexOptions()
+                                .name("batches_inbound_upload_id")
+                                .partialFilterExpression(Filters.exists("inboundFiles.uploadId")));
 
         // field_recommendations
         Bson openStates = Filters.in("reviewStatus", "PENDING", "SKIPPED");

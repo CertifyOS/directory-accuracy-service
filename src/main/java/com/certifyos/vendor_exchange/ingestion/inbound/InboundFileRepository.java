@@ -106,14 +106,19 @@ public class InboundFileRepository {
     }
 
     /**
-     * The entry for an upload id, for the storage event handler and operator reads.
+     * The entry for an upload id, for the storage event handler and operator reads, on the
+     * {@code batches_inbound_upload_id} index.
      *
      * @param uploadId {@code <bucket>|<objectName>|<generation>}
      * @return the entry and its batch, if any
      */
     public Optional<Located> findByUploadId(String uploadId) {
-        return locate(
-                Filters.eq(FIELD + ".uploadId", uploadId), element -> uploadId.equals(element.getString("uploadId")));
+        return locate(byUploadId(uploadId), element -> uploadId.equals(element.getString("uploadId")));
+    }
+
+    /** The filter {@link #findByUploadId} runs, shared with the test that explains it. */
+    static Bson byUploadId(String uploadId) {
+        return Filters.eq(FIELD + ".uploadId", uploadId);
     }
 
     /**

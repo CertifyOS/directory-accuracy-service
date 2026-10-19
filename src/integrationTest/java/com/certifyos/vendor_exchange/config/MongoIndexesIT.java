@@ -108,6 +108,10 @@ public class MongoIndexesIT {
         Assertions.assertEquals(
                 new Document("inboundFiles.externalRef", new Document("$exists", true)),
                 batches.get("batches_inbound_external_ref").get("partialFilterExpression", Document.class));
+        assertKey(batches, "batches_inbound_upload_id", new Document("inboundFiles.uploadId", 1));
+        Assertions.assertEquals(
+                new Document("inboundFiles.uploadId", new Document("$exists", true)),
+                batches.get("batches_inbound_upload_id").get("partialFilterExpression", Document.class));
 
         Map<String, Document> recommendations = byName(collections.fieldRecommendations());
         Document openStates = new Document("reviewStatus", new Document("$in", List.of("PENDING", "SKIPPED")));
