@@ -280,6 +280,35 @@ class VendorIngestionOpsResourceIT {
     @Test
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
+    void attachOfAFileNamingAnotherTenantIs409() {
+        ExportBatch ours = deliveredBatch(TENANT, "mismatch");
+        // dropped in our folder, but the file names the other tenant and its batch
+        String name =
+                InboundNames.TO_PREFIX + TENANT + "/" + OTHER + "_" + OTHER + "-mismatch-2026-10-001_V77_20261019.csv";
+        UnmatchedUpload row = insert(new UnmatchedUpload(
+                InboundFixtures.VENDOR_BUCKET + "|" + name + "|" + generation(),
+                TENANT,
+                InboundNames.parse(name).orElseThrow(),
+                InboundNames.TENANT_MISMATCH,
+                now(),
+                null));
+
+        member().pathParam("uploadId", row.id())
+                .body(Map.of("exportBatchId", ours.id(), "reason", "looks like ours"))
+                .post(ATTACH)
+                .then()
+                .statusCode(409)
+                .contentType(Problem.MEDIA_TYPE)
+                .body("code", Matchers.equalTo(InboundNames.TENANT_MISMATCH));
+
+        Assertions.assertNull(unmatched.find(row.id()).orElseThrow().resolution(), "the row stays open");
+        Assertions.assertTrue(inbound.findByUploadId(row.id()).isEmpty(), "nothing is claimed");
+        Assertions.assertNull(batches.find(ours.id()).orElseThrow().inboundBatchId());
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
     void attachOfAnUploadOnAnotherBatchIs409() {
         ExportBatch first = deliveredBatch(TENANT, "claimed");
         ExportBatch second = deliveredBatch(TENANT, "claimedb");
