@@ -24,6 +24,9 @@ public interface DalUserClient {
     /** The fixed {@code requesting-user-id} the DAL interceptor needs to see. */
     String REQUESTING_USER_ID = "vendor-exchange-service";
 
+    /** The header the DAL interceptor reads the caller's tenant from. */
+    String ORGANIZATION_HEADER = "requesting-organization-id";
+
     /**
      * Looks a user up by email.
      *
@@ -37,5 +40,5 @@ public interface DalUserClient {
     DalUserResponse byEmail(
             @QueryParam("email") String email,
             @QueryParam("includePermissions") boolean includePermissions,
-            @HeaderParam("requesting-organization-id") String tenantId);
+            @HeaderParam(ORGANIZATION_HEADER) String tenantId);
 }

@@ -39,6 +39,12 @@ public interface VendorExchangeConfig {
     /** api-layer, called with an Auth0 client-credentials token for practitioner selection and templates. */
     ApiLayer apiLayer();
 
+    /** Ingestion of the vendor's response file (phase 2). */
+    Ingestion ingestion();
+
+    /** file-ingestion-service, called for the NDJSON stream of the mapped vendor file. */
+    FileIngestion fileIngestion();
+
     /** Pub/Sub push delivery of the egress completion event. */
     PubSub pubsub();
 
@@ -89,6 +95,66 @@ public interface VendorExchangeConfig {
          * IAP audience of api-layer's backend when it sits behind IAP with a Google-managed client
          * ({@code /projects/<number>/global/backendServices/<id>}). Present: a Google ID token for
          * it is sent in {@code Proxy-Authorization} beside the Auth0 bearer. Absent: no IAP header.
+         */
+        Optional<String> iapAudience();
+    }
+
+    /** Ingestion settings. */
+    interface Ingestion {
+        /** Bucket the received vendor file is archived in before and after processing. */
+        String archiveBucket();
+
+        /** Hours ingestion of one inbound file may take before the deadline check applies. */
+        @WithDefault("6")
+        int ingestionDeadlineHours();
+
+        /** Rows staged per write when the mapped file is read. */
+        @WithDefault("500")
+        int stageChunkRows();
+
+        /** Largest page size a review list request may ask for. */
+        @WithDefault("200")
+        int reviewPageLimitMax();
+
+        /** Months a rejected value is remembered so the same value is not proposed again. */
+        @WithDefault("12")
+        int rejectedValueTtlMonths();
+
+        /** Minutes a release waits for the read back of the written values before it is alerted. */
+        @WithDefault("30")
+        int releaseReadBackDeadlineMinutes();
+
+        /** Most proposals a single bulk release may cover. */
+        @WithDefault("5000")
+        int releaseBulkMax();
+
+        /** Minutes without progress after which an inbound file counts as stale. */
+        @WithDefault("30")
+        int inboundStaleMinutes();
+
+        /** Which signal tells ingestion that the vendor's delivery is complete. */
+        @WithDefault("DATA_FILE")
+        String completenessSignal();
+    }
+
+    /**
+     * file-ingestion-service settings. One vendor in the MVP, so the design's per-vendor mapping id
+     * is the single {@code mappingId}; a second vendor turns it into a map.
+     */
+    interface FileIngestion {
+        /** Base URL of file-ingestion-service. */
+        String url();
+
+        /** Name this service identifies itself with to file-ingestion-service. */
+        @WithDefault("vendor-ingestion")
+        String consumerIdentifier();
+
+        /** Mapping that turns the vendor file into rows; absent means ingestion is not configured yet. */
+        Optional<String> mappingId();
+
+        /**
+         * IAP audience of file-ingestion-service's backend when it sits behind IAP with a
+         * Google-managed client. Present: a Google ID token for it is sent. Absent: no IAP header.
          */
         Optional<String> iapAudience();
     }

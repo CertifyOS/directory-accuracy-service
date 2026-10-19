@@ -1,6 +1,8 @@
 package com.certifyos.vendor_exchange;
 
 import com.certifyos.vendor_exchange.auth.RequiresPermission;
+import com.certifyos.vendor_exchange.config.MongoIndexes;
+import com.certifyos.vendor_exchange.persistence.Collections;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaCall;
@@ -10,6 +12,7 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.CompositeArchRule;
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition;
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
 import jakarta.inject.Inject;
@@ -32,7 +35,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
         importOptions = {ImportOption.DoNotIncludeTests.class, ImportOption.DoNotIncludeJars.class})
 class ArchitectureTest {
 
-    /** Shared code never imports feature code: the foundations know nothing about the export lane. */
+    /** Shared code never imports feature code: the foundations know nothing about either lane. */
     @ArchTest
     static final ArchRule sharedPackagesDoNotDependOnFeatures = ArchRuleDefinition.noClasses()
             .that()
@@ -46,7 +49,17 @@ class ArchitectureTest {
                     "..vendor_exchange.metrics..")
             .should()
             .dependOnClassesThat()
+            .resideInAnyPackage("..vendor_exchange.export..", "..vendor_exchange.ingestion..")
+            .allowEmptyShould(true);
+
+    /** The export lane is phase 1 and stands alone: it never reaches into the ingestion lane. */
+    @ArchTest
+    static final ArchRule exportDoesNotDependOnIngestion = ArchRuleDefinition.noClasses()
+            .that()
             .resideInAPackage("..vendor_exchange.export..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("..vendor_exchange.ingestion..")
             .allowEmptyShould(true);
 
     /** No package cycles between the top-level slices. */
@@ -130,7 +143,7 @@ class ArchitectureTest {
     static final ArchRule operatorEndpointsDeclarePermission = ArchRuleDefinition.methods()
             .that()
             .areDeclaredInClassesThat()
-            .resideInAPackage("..export.api..")
+            .resideInAnyPackage("..export.api..", "..ingestion.api..")
             .and()
             .areAnnotatedWith(Operation.class)
             .should()
@@ -152,14 +165,30 @@ class ArchitectureTest {
             "bulkWrite");
 
     /**
-     * The audit collection is append-only (design, Audit trail): the repository may insert and read,
-     * never update, replace or delete. Retention is a platform matter; nothing in code shortens it.
+     * The two audit collections, {@code vendor_export_events} ({@code events()}) and {@code
+     * vendor_review_events} ({@code reviewEvents()}), are append-only (designs, Audit trail): the
+     * repository may insert and read, never update, replace or delete. Two halves: the audit
+     * package calls no write method, and no class outside it reaches either collection, directly or
+     * through {@code all()}, except the accessor class itself and the index setup. Retention is a
+     * platform matter; nothing in code shortens it.
      */
     @ArchTest
-    static final ArchRule auditIsAppendOnly = ArchRuleDefinition.noClasses()
-            .that()
-            .resideInAPackage("..audit..")
-            .should()
-            .callMethodWhere(JavaCall.Predicates.target(HasName.Predicates.nameMatching(MONGO_WRITES)))
-            .allowEmptyShould(true);
+    static final ArchRule auditIsAppendOnly = CompositeArchRule.of(ArchRuleDefinition.noClasses()
+                    .that()
+                    .resideInAPackage("..audit..")
+                    .should()
+                    .callMethodWhere(JavaCall.Predicates.target(HasName.Predicates.nameMatching(MONGO_WRITES)))
+                    .allowEmptyShould(true))
+            .and(ArchRuleDefinition.noClasses()
+                    .that()
+                    .resideOutsideOfPackage("..audit..")
+                    .and()
+                    .doNotBelongToAnyOf(Collections.class, MongoIndexes.class)
+                    .should()
+                    .callMethod(Collections.class, "events")
+                    .orShould()
+                    .callMethod(Collections.class, "reviewEvents")
+                    .orShould()
+                    .callMethod(Collections.class, "all")
+                    .allowEmptyShould(true));
 }

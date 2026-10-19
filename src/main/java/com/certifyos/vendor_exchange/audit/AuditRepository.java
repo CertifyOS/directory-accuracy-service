@@ -4,19 +4,23 @@ import com.certifyos.vendor_exchange.persistence.Collections;
 import com.certifyos.vendor_exchange.persistence.Documents;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.ClientSession;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.jboss.logging.Logger;
 
 /**
- * The audit trail: append-only, one document per event, kept seven years. Three ways to write, one
- * per commit rule in the design: inside a transition's transaction, standalone, or standalone and
- * idempotent on a natural key (a received message id). Nothing here ever updates or deletes.
+ * The audit trail: append-only, one document per event, kept seven years. Field events ({@link
+ * AuditEventType.Scope#FIELD}) go to {@code vendor_review_events}, every other event to {@code
+ * vendor_export_events}. Three ways to write, one per commit rule in the design: inside a
+ * transition's transaction, standalone, or standalone and idempotent on a natural key (a received
+ * message id). Nothing here ever updates or deletes.
  */
 @ApplicationScoped
 public class AuditRepository {
@@ -24,9 +28,25 @@ public class AuditRepository {
     /** The logger the structured audit line goes to; alerts count these lines in Cloud Logging. */
     public static final String AUDIT_LOGGER = "audit";
 
-    /** The detail keys the design's alerts evaluate on; echoed on the line when the event carries them. */
-    static final java.util.List<String> ALERT_KEYS =
-            java.util.List.of("cause", "completionSource", "match", "reason", "check", "trigger");
+    /** The detail keys the designs' alerts evaluate on; echoed on the line when the event carries them. */
+    static final List<String> ALERT_KEYS = List.of(
+            "cause",
+            "completionSource",
+            "match",
+            "reason",
+            "check",
+            "trigger",
+            "failureReason",
+            "outcome",
+            "status",
+            "action",
+            "writePath");
+
+    /**
+     * An alert value reaches the line only as one token: letters, digits and {@code _ . : / -}, at
+     * most 64 characters. Free text (an exception message as an outcome) stays in the stored detail.
+     */
+    private static final Pattern TOKEN = Pattern.compile("^[A-Za-z0-9_.:/-]{1,64}$");
 
     private static final Logger AUDIT = Logger.getLogger(AUDIT_LOGGER);
 
@@ -38,8 +58,10 @@ public class AuditRepository {
 
     /**
      * The one line per audit event, after the write: {@code AUDIT type=... tenantId=... vendor=...
-     * exportBatchId=... attempt=... actor=...} plus the alert keys the event carries. Ids and
-     * enumerations only, never a practitioner identifier.
+     * exportBatchId=... attempt=... actor=...}, then the ingestion ids the event carries ({@code
+     * uploadId}, {@code fieldRecommendationId}, {@code certifyPractitionerId}, {@code releaseId}),
+     * then the alert keys the event carries whose value is a single token. Ids and enumerations
+     * only, never an NPI, a field value or free text.
      *
      * @param event the event written
      * @return the line
@@ -51,17 +73,32 @@ public class AuditRepository {
         out.append(" exportBatchId=").append(event.exportBatchId());
         out.append(" attempt=").append(event.attempt());
         out.append(" actor=").append(event.actor());
+        appendWhenSet(out, "uploadId", event.uploadId());
+        appendWhenSet(out, "fieldRecommendationId", event.fieldRecommendationId());
+        appendWhenSet(out, "certifyPractitionerId", event.certifyPractitionerId());
+        appendWhenSet(out, "releaseId", event.releaseId());
         for (String key : ALERT_KEYS) {
             Object value = event.detail().get(key);
-            if (value != null) {
-                out.append(' ').append(key).append('=').append(value);
+            if (value != null && TOKEN.matcher(value.toString()).matches()) {
+                appendWhenSet(out, key, value);
             }
         }
         return out.toString();
     }
 
+    private static void appendWhenSet(StringBuilder out, String key, Object value) {
+        if (value != null) {
+            out.append(' ').append(key).append('=').append(value);
+        }
+    }
+
     private static void log(AuditEvent event) {
         AUDIT.info(line(event));
+    }
+
+    /** The collection an event belongs in: review events for field events, export events otherwise. */
+    private MongoCollection<Document> collectionFor(AuditEvent event) {
+        return event.type().scope() == AuditEventType.Scope.FIELD ? collections.reviewEvents() : collections.events();
     }
 
     /**
@@ -71,7 +108,7 @@ public class AuditRepository {
      * @param event the event
      */
     public void write(ClientSession session, AuditEvent event) {
-        collections.events().insertOne(session, event.toDocument());
+        collectionFor(event).insertOne(session, event.toDocument());
         log(event);
     }
 
@@ -81,7 +118,7 @@ public class AuditRepository {
      * @param event the event
      */
     public void write(AuditEvent event) {
-        collections.events().insertOne(event.toDocument());
+        collectionFor(event).insertOne(event.toDocument());
         log(event);
     }
 
@@ -95,7 +132,7 @@ public class AuditRepository {
      */
     public boolean writeIdempotent(AuditEvent event) {
         try {
-            collections.events().insertOne(event.toDocument());
+            collectionFor(event).insertOne(event.toDocument());
             log(event);
             return true;
         } catch (MongoWriteException failure) {
@@ -174,6 +211,47 @@ public class AuditRepository {
                 .events()
                 .find(filter)
                 .sort(Sorts.orderBy(Sorts.descending("occurredAt"), Sorts.descending("_id")))
+                .limit(limit)) {
+            events.add(AuditEvent.fromDocument(doc));
+        }
+        return events;
+    }
+
+    /**
+     * A field recommendation's whole trail in the order it was written (natural {@code _id} order,
+     * as {@link #trailForBatch}). The id arrives from a caller's URL, so the read is tenant-scoped:
+     * another tenant's id reads nothing. The {@code (fieldRecommendationId, _id)} index serves it.
+     *
+     * @param tenantId the tenant
+     * @param fieldRecommendationId the field recommendation
+     * @param limit the most rows to return
+     * @return the events, oldest first
+     */
+    public List<AuditEvent> trailForField(String tenantId, String fieldRecommendationId, int limit) {
+        return reviewEvents(
+                Filters.and(
+                        Filters.eq("fieldRecommendationId", fieldRecommendationId), Filters.eq("tenantId", tenantId)),
+                limit);
+    }
+
+    /**
+     * The field events of one release, in the order they were written.
+     *
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param limit the most rows to return
+     * @return the events, oldest first
+     */
+    public List<AuditEvent> findForRelease(String tenantId, String releaseId, int limit) {
+        return reviewEvents(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("releaseId", releaseId)), limit);
+    }
+
+    private List<AuditEvent> reviewEvents(Bson filter, int limit) {
+        List<AuditEvent> events = new ArrayList<>();
+        for (Document doc : collections
+                .reviewEvents()
+                .find(filter)
+                .sort(Sorts.ascending("_id"))
                 .limit(limit)) {
             events.add(AuditEvent.fromDocument(doc));
         }

@@ -13,10 +13,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * The metrics from the design's Observability section, one method per name. Tags carry tenant,
- * vendor, state, reason, source or job, never a practitioner. Telemetry is best effort: nothing
- * here throws into a caller's transaction. Names use dots; the Prometheus endpoint renders them
- * with underscores ({@code vendor_export_tick_duration_seconds}).
+ * The metrics from the export and ingestion designs' Observability sections, one method per name.
+ * Tags are the designs' (tenant, vendor, state, reason, source, job, and for ingestion also event
+ * type, result, status, disposition, action and outcome), never a practitioner, an NPI, a location
+ * or a field value. Telemetry is best effort: nothing here throws into a caller's transaction.
+ * Names use dots; the Prometheus endpoint renders them with underscores ({@code
+ * vendor_export_tick_duration_seconds}).
  */
 @ApplicationScoped
 public class VendorExchangeMetrics {
@@ -37,6 +39,41 @@ public class VendorExchangeMetrics {
     public static final String BATCHES_BY_STATE = "vendor_export.batches.by_state";
     public static final String JOBS_RETRIES = "vendor_export.jobs.retries";
     public static final String JOBS_FINAL_FAILURES = "vendor_export.jobs.final_failures";
+
+    /**
+     * Every ingestion metric name in the design. The gauges ({@code INBOUND_BY_STATE}, {@code
+     * INBOUND_AGE_SECONDS}, {@code PARSE_WAIT_SECONDS}, {@code REVIEW_PENDING}, {@code
+     * REVIEW_PENDING_AGE_DAYS}, {@code RELEASE_READBACK_SECONDS}) are registered through {@link
+     * #registerGauge}. {@code vendor_ingestion.dlq.depth} is a Pub/Sub platform metric, named in the
+     * runbook only.
+     */
+    public static final String INGESTION_ARRIVALS_RECEIVED = "vendor_ingestion.arrivals.received";
+
+    public static final String INGESTION_ARRIVALS_DUPLICATE_LOGGED = "vendor_ingestion.arrivals.duplicate_logged";
+    public static final String INGESTION_ARRIVALS_UNMATCHED = "vendor_ingestion.arrivals.unmatched";
+    public static final String INGESTION_ARRIVALS_IGNORED_EVENT_TYPE = "vendor_ingestion.arrivals.ignored_event_type";
+    public static final String INGESTION_INBOUND_BY_STATE = "vendor_ingestion.inbound.by_state";
+    public static final String INGESTION_INBOUND_AGE_SECONDS = "vendor_ingestion.inbound.age_seconds";
+    public static final String INGESTION_ARCHIVE_DURATION = "vendor_ingestion.archive.duration";
+    public static final String INGESTION_REGISTER_RESULT = "vendor_ingestion.register.result";
+    public static final String INGESTION_PARSE_WAIT_SECONDS = "vendor_ingestion.parse.wait_seconds";
+    public static final String INGESTION_COMPLETION_SOURCE = "vendor_ingestion.completion.source";
+    public static final String INGESTION_COMPLETION_STATUS = "vendor_ingestion.completion.status";
+    public static final String INGESTION_STAGE_ROWS = "vendor_ingestion.stage.rows";
+    public static final String INGESTION_STAGE_DOCUMENTS = "vendor_ingestion.stage.documents";
+    public static final String INGESTION_STAGE_CHUNK_DURATION = "vendor_ingestion.stage.chunk.duration";
+    public static final String INGESTION_STAGE_STREAM_429 = "vendor_ingestion.stage.stream_429";
+    public static final String INGESTION_REVIEW_PENDING = "vendor_ingestion.review.pending";
+    public static final String INGESTION_REVIEW_PENDING_AGE_DAYS = "vendor_ingestion.review.pending_age_days";
+    public static final String INGESTION_REVIEW_DECISIONS = "vendor_ingestion.review.decisions";
+    public static final String INGESTION_REVIEW_CONFLICTS_409 = "vendor_ingestion.review.conflicts_409";
+    public static final String INGESTION_RELEASE_JOBS = "vendor_ingestion.release.jobs";
+    public static final String INGESTION_RELEASE_FAILED_REASON = "vendor_ingestion.release.failed_reason";
+    public static final String INGESTION_RELEASE_OUTCOME = "vendor_ingestion.release.outcome";
+    public static final String INGESTION_RELEASE_READBACK_SECONDS = "vendor_ingestion.release.readback_seconds";
+    public static final String INGESTION_OV_EVENTS_NOT_OURS = "vendor_ingestion.ov_events.not_ours";
+    public static final String INGESTION_JOBS_RETRIES = "vendor_ingestion.jobs.retries";
+    public static final String INGESTION_JOBS_FINAL_FAILURES = "vendor_ingestion.jobs.final_failures";
 
     private final MeterRegistry registry;
     private final Timer tickDuration;
@@ -110,9 +147,118 @@ public class VendorExchangeMetrics {
         counter(JOBS_FINAL_FAILURES, Tags.of("job", job)).increment();
     }
 
+    /** A vendor upload arrived and was claimed for its batch. */
+    public void arrivalReceived(String tenant, String vendor) {
+        counter(INGESTION_ARRIVALS_RECEIVED, Tags.of("tenant", tenant, "vendor", vendor))
+                .increment();
+    }
+
+    /** A second upload for a batch was logged and not processed. */
+    public void arrivalDuplicateLogged(String tenant, String vendor) {
+        counter(INGESTION_ARRIVALS_DUPLICATE_LOGGED, Tags.of("tenant", tenant, "vendor", vendor))
+                .increment();
+    }
+
+    /** An upload matched no batch, for a reason. */
+    public void arrivalUnmatched(String tenant, String reason) {
+        counter(INGESTION_ARRIVALS_UNMATCHED, Tags.of("tenant", tenant, "reason", reason))
+                .increment();
+    }
+
+    /** A storage notification of a type the handler does not act on. */
+    public void arrivalIgnoredEventType(String eventType) {
+        counter(INGESTION_ARRIVALS_IGNORED_EVENT_TYPE, Tags.of("eventType", eventType))
+                .increment();
+    }
+
+    /** Wall time of one archive copy. */
+    public void archiveDuration(String tenant, Duration duration) {
+        registry.timer(INGESTION_ARCHIVE_DURATION, Tags.of("tenant", tenant)).record(duration);
+    }
+
+    /** The file-ingestion register answer: {@code 201}, {@code 200}, {@code 4xx} or {@code 5xx}. */
+    public void registerResult(String result) {
+        counter(INGESTION_REGISTER_RESULT, Tags.of("result", result)).increment();
+    }
+
+    /** How a parse completion was learned: {@code EVENT} or {@code DEADLINE}. */
+    public void completionSource(String source) {
+        counter(INGESTION_COMPLETION_SOURCE, Tags.of("source", source)).increment();
+    }
+
+    /** How a parse ended: {@code COMPLETED}, {@code PARTIAL} or {@code INVALID}. */
+    public void completionStatus(String status) {
+        counter(INGESTION_COMPLETION_STATUS, Tags.of("status", status)).increment();
+    }
+
+    /** Rows staged with one disposition. */
+    public void stageRows(String tenant, String disposition, long count) {
+        counter(INGESTION_STAGE_ROWS, Tags.of("tenant", tenant, "disposition", disposition))
+                .increment(count);
+    }
+
+    /** Field recommendation documents written by staging. */
+    public void stageDocuments(String tenant, long count) {
+        counter(INGESTION_STAGE_DOCUMENTS, Tags.of("tenant", tenant)).increment(count);
+    }
+
+    /** Wall time of one staging chunk. */
+    public void stageChunkDuration(Duration duration) {
+        registry.timer(INGESTION_STAGE_CHUNK_DURATION).record(duration);
+    }
+
+    /** The row stream answered 429. */
+    public void stageStream429() {
+        counter(INGESTION_STAGE_STREAM_429, Tags.empty()).increment();
+    }
+
+    /** A reviewer decided a field: the action taken. */
+    public void reviewDecision(String tenant, String action) {
+        counter(INGESTION_REVIEW_DECISIONS, Tags.of("tenant", tenant, "action", action))
+                .increment();
+    }
+
+    /** A decision lost a version race and was answered 409. */
+    public void reviewConflict(String tenant) {
+        counter(INGESTION_REVIEW_CONFLICTS_409, Tags.of("tenant", tenant)).increment();
+    }
+
+    /** A release job ended: {@code RELEASED} or {@code RELEASE_FAILED}. */
+    public void releaseJob(String tenant, String result) {
+        counter(INGESTION_RELEASE_JOBS, Tags.of("tenant", tenant, "result", result))
+                .increment();
+    }
+
+    /** A release failed for a reason. */
+    public void releaseFailedReason(String reason) {
+        counter(INGESTION_RELEASE_FAILED_REASON, Tags.of("reason", reason)).increment();
+    }
+
+    /** What a release did in the directory: {@code WON}, {@code OUTRANKED}, {@code NOT_APPLIED} or {@code UNKNOWN}. */
+    public void releaseOutcome(String tenant, String outcome) {
+        counter(INGESTION_RELEASE_OUTCOME, Tags.of("tenant", tenant, "outcome", outcome))
+                .increment();
+    }
+
+    /** A survivorship {@code mdm.slice.ov_generated} event that matched no release of ours. */
+    public void ovEventNotOurs() {
+        counter(INGESTION_OV_EVENTS_NOT_OURS, Tags.empty()).increment();
+    }
+
+    /** An ingestion job attempt failed and will be retried. */
+    public void ingestionJobRetry(String job) {
+        counter(INGESTION_JOBS_RETRIES, Tags.of("job", job)).increment();
+    }
+
+    /** An ingestion job exhausted its retries. */
+    public void ingestionJobFinalFailure(String job) {
+        counter(INGESTION_JOBS_FINAL_FAILURES, Tags.of("job", job)).increment();
+    }
+
     /**
      * Registers a gauge whose value is read on every scrape. Used by the export lane for the
-     * by-state gauges, whose values come from the database.
+     * by-state gauges and by the ingestion lane for its gauges, whose values come from the
+     * database.
      *
      * @param name the metric name
      * @param tags its tags

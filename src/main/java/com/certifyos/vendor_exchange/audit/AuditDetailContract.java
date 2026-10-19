@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The design's per-event contracts table: the detail keys every event type must name. Checked
+ * The designs' per-event contracts tables: the detail keys every event type must name. Checked
  * where the event is built, so a writer that forgets a field fails the test that exercises it.
  * A key counts as named when the writer passed it, even with a null value (an egress failure has
  * no output URI); extra keys are allowed. Two keys beyond the design's table come from the ticket:
@@ -73,7 +73,67 @@ public final class AuditDetailContract {
         require(AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCELLED, "cancelledCorrelationId", "outcome");
         require(AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCEL_REJECTED, "cancelledCorrelationId", "outcome");
         require(AuditEventType.EXPORT_BATCH_SUPERSEDED, "supersededBy", "reason");
-        require(AuditEventType.EXPORT_BATCH_ACKNOWLEDGED, "inboundBatchId", "vendorBatchId", "daysToResponse");
+        require(AuditEventType.EXPORT_BATCH_ACKNOWLEDGED, "uploadId", "vendorBatchId", "daysToResponse");
+        requireIngestion();
+    }
+
+    /**
+     * The ingestion design's rows. Optional keys are not required: {@code overwroteGeneration} on
+     * received, {@code parsedLegs} on unmatched, {@code certifyLocationId} and {@code comment} on
+     * the three decisions.
+     */
+    private static void requireIngestion() {
+        require(AuditEventType.INBOUND_FILE_RECEIVED, "objectName", "generation", "vendorBatchId", "eventTime");
+        require(
+                AuditEventType.INBOUND_FILE_DUPLICATE_LOGGED,
+                "objectName",
+                "generation",
+                "firstUploadId",
+                "firstUploadState");
+        require(AuditEventType.INBOUND_FILE_UNMATCHED, "reason", "objectName", "generation");
+        require(AuditEventType.INBOUND_UPLOAD_ATTACHED, "exportBatchId", "uploadId");
+        require(AuditEventType.INBOUND_UPLOAD_DISCARDED, "reason", "uploadId");
+        require(AuditEventType.INBOUND_FILE_ARCHIVED, "archivePath", "bytes", "copyResult");
+        require(
+                AuditEventType.INBOUND_FILE_INGESTION_REQUESTED,
+                "ingestionId",
+                "externalRef",
+                "mappingId",
+                "registerResponse",
+                "deadlineAt");
+        require(
+                AuditEventType.INBOUND_FILE_PARSED,
+                "status",
+                "populatedRows",
+                "validRows",
+                "invalidRows",
+                "completionSource",
+                "waitSeconds");
+        require(AuditEventType.INBOUND_FILE_INGESTION_FAILED, "reason", "completionSource");
+        require(
+                AuditEventType.INBOUND_FILE_STAGED,
+                "dispositions",
+                "written",
+                "chunks",
+                "durationMs",
+                "practitionerFieldDisagreements");
+        require(AuditEventType.INBOUND_FILE_FAILED, "failedStep", "failureReason", "lastError", "jobAttempts");
+        require(AuditEventType.INBOUND_FILE_RECONCILED, "state", "ageMinutes", "action");
+        require(AuditEventType.FIELD_APPROVED, "field", "fromStatus", "version");
+        require(AuditEventType.FIELD_REJECTED, "field", "fromStatus", "version", "rejectedValueId", "rejectionCount");
+        require(AuditEventType.FIELD_SKIPPED, "field", "fromStatus", "version");
+        require(AuditEventType.FIELD_ROLLED_BACK, "reason", "version");
+        require(AuditEventType.FIELD_RELEASE_REQUESTED, "releaseId", "bulk");
+        require(
+                AuditEventType.FIELD_RELEASED,
+                "outcome",
+                "winningSource",
+                "writePath",
+                "resource",
+                "crosswalkId",
+                "completionSource",
+                "readBackSeconds");
+        require(AuditEventType.FIELD_RELEASE_FAILED, "reason", "error", "jobAttempts");
     }
 
     private AuditDetailContract() {}

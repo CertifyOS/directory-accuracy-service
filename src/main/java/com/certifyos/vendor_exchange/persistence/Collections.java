@@ -4,10 +4,11 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.List;
 import org.bson.Document;
 
 /**
- * The four collections this service owns in database {@code vendor_exchange}. JobRunr owns five more
+ * The eight collections this service owns in database {@code vendor_exchange}. JobRunr owns five more
  * ({@code jobrunr_*}) in the same database and our code never names them.
  */
 @ApplicationScoped
@@ -44,5 +45,42 @@ public class Collections {
     /** Append-only audit trail; one document per lifecycle event. */
     public MongoCollection<Document> events() {
         return database().getCollection("vendor_export_events");
+    }
+
+    /** One document per recommended field value from the vendor, staged for review. */
+    public MongoCollection<Document> fieldRecommendations() {
+        return database().getCollection("field_recommendations");
+    }
+
+    /** Vendor files that matched no batch, kept until an operator resolves them. */
+    public MongoCollection<Document> unmatchedUploads() {
+        return database().getCollection("vendor_unmatched_uploads");
+    }
+
+    /** Values a reviewer rejected, suppressed until they expire. */
+    public MongoCollection<Document> rejectedValues() {
+        return database().getCollection("vendor_rejected_values");
+    }
+
+    /** Append-only review trail; one document per review action. */
+    public MongoCollection<Document> reviewEvents() {
+        return database().getCollection("vendor_review_events");
+    }
+
+    /**
+     * Every collection this service owns, in declaration order.
+     *
+     * @return an unmodifiable list of the service collections
+     */
+    public List<MongoCollection<Document>> all() {
+        return List.of(
+                schedules(),
+                batches(),
+                npis(),
+                events(),
+                fieldRecommendations(),
+                unmatchedUploads(),
+                rejectedValues(),
+                reviewEvents());
     }
 }

@@ -1,14 +1,21 @@
 package com.certifyos.vendor_exchange.auth;
 
 /**
- * The two operator permissions from the design, as DAL resource and action. Checked per endpoint
- * only when {@code vendor-exchange.permissions.enforce} is true.
+ * The operator permissions from the designs, as DAL resource and action: two for exports, three
+ * for reviewing the vendor's recommendations. Checked per endpoint only when {@code
+ * vendor-exchange.permissions.enforce} is true.
  */
 public enum Permission {
     /** Create, change, run and retry exports. */
     MANAGE("vendor-export", "manage"),
     /** Read schedules, batches and audit. */
-    READ("vendor-export", "read");
+    READ("vendor-export", "read"),
+    /** Read field recommendations and their review trail. */
+    REVIEW_READ("vendor-review", "read"),
+    /** Approve, reject, skip and roll back field recommendations. */
+    REVIEW_DECIDE("vendor-review", "decide"),
+    /** Release approved field recommendations to the directory. */
+    REVIEW_RELEASE("vendor-review", "release");
 
     private final String resource;
     private final String action;

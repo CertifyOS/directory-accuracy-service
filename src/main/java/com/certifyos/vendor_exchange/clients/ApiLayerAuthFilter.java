@@ -24,7 +24,7 @@ public class ApiLayerAuthFilter implements ClientRequestFilter {
         try {
             request.getHeaders().putSingle(HttpHeaders.AUTHORIZATION, "Bearer " + tokens.accessToken());
         } catch (RuntimeException failure) {
-            throw new IOException("could not obtain an api-layer token", failure);
+            throw new IOException("could not obtain an Auth0 machine token", failure);
         }
     }
 }

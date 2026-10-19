@@ -19,8 +19,14 @@ import org.bson.Document;
  * @param vendor the vendor; null only for service events
  * @param exportBatchId the batch; required for batch events, null for schedule events
  * @param attempt the batch attempt the event belongs to, or null
- * @param actor who caused it: {@link Actors#SYSTEM}, {@link Actors#EGRESS_EVENT} or an operator id
+ * @param actor who caused it: one of {@link Actors} or an operator id
  * @param jobId the JobRunr job that wrote it, or null for HTTP handlers
+ * @param uploadId the vendor upload a file or field event belongs to, or null
+ * @param fieldRecommendationId the field recommendation; required for {@link AuditEventType.Scope#FIELD}
+ *     events, null otherwise
+ * @param certifyPractitionerId the practitioner a field event is about; required for {@link
+ *     AuditEventType.Scope#FIELD} events, null otherwise
+ * @param releaseId the release a field event belongs to, set from the release request on, or null
  * @param occurredAt when it happened
  * @param detail the per-type payload, immutable
  */
@@ -33,12 +39,22 @@ public record AuditEvent(
         Integer attempt,
         String actor,
         String jobId,
+        String uploadId,
+        String fieldRecommendationId,
+        String certifyPractitionerId,
+        String releaseId,
         Instant occurredAt,
         Map<String, Object> detail) {
 
     public AuditEvent {
         requireActor(type, actor);
         requireIds(type, tenantId, vendor, exportBatchId);
+        if (type.requiresField() && fieldRecommendationId == null) {
+            throw new IllegalArgumentException(type + " requires fieldRecommendationId");
+        }
+        if (type.requiresField() && certifyPractitionerId == null) {
+            throw new IllegalArgumentException(type + " requires certifyPractitionerId");
+        }
         detail = detail == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(detail));
     }
 
@@ -64,7 +80,7 @@ public record AuditEvent(
     }
 
     /**
-     * Starts an event for a schedule or the service.
+     * Starts an event for a schedule, the service or a field recommendation.
      *
      * @param type the type
      * @param tenantId the tenant, or null for a service event
@@ -101,6 +117,10 @@ public record AuditEvent(
         Documents.put(doc, "exportBatchId", exportBatchId);
         Documents.put(doc, "attempt", attempt);
         Documents.put(doc, "jobId", jobId);
+        Documents.put(doc, "uploadId", uploadId);
+        Documents.put(doc, "fieldRecommendationId", fieldRecommendationId);
+        Documents.put(doc, "certifyPractitionerId", certifyPractitionerId);
+        Documents.put(doc, "releaseId", releaseId);
         if (!detail.isEmpty()) {
             doc.append("detail", new Document(detail));
         }
@@ -124,6 +144,10 @@ public record AuditEvent(
                 Documents.intValue(doc, "attempt"),
                 doc.getString("actor"),
                 doc.getString("jobId"),
+                doc.getString("uploadId"),
+                doc.getString("fieldRecommendationId"),
+                doc.getString("certifyPractitionerId"),
+                doc.getString("releaseId"),
                 Documents.instant(doc, "occurredAt"),
                 detail == null ? Map.of() : detail);
     }
@@ -137,6 +161,10 @@ public record AuditEvent(
         private Integer attempt;
         private String actor = Actors.SYSTEM;
         private String jobId;
+        private String uploadId;
+        private String fieldRecommendationId;
+        private String certifyPractitionerId;
+        private String releaseId;
         private Instant occurredAt;
         private final Map<String, Object> detail = new LinkedHashMap<>();
         private final java.util.Set<String> named = new java.util.LinkedHashSet<>();
@@ -151,6 +179,31 @@ public record AuditEvent(
         public Builder batch(String batchId, int batchAttempt) {
             this.exportBatchId = batchId;
             this.attempt = batchAttempt;
+            return this;
+        }
+
+        /** Sets the batch and leaves the attempt unset; for file and field events. */
+        public Builder batch(String batchId) {
+            this.exportBatchId = batchId;
+            return this;
+        }
+
+        /** Sets the vendor upload the event belongs to. */
+        public Builder upload(String upload) {
+            this.uploadId = upload;
+            return this;
+        }
+
+        /** Sets the field recommendation and the practitioner it is about. */
+        public Builder field(String recommendationId, String practitionerId) {
+            this.fieldRecommendationId = recommendationId;
+            this.certifyPractitionerId = practitionerId;
+            return this;
+        }
+
+        /** Sets the release the event belongs to. */
+        public Builder release(String release) {
+            this.releaseId = release;
             return this;
         }
 
@@ -199,6 +252,10 @@ public record AuditEvent(
                     attempt,
                     actor,
                     jobId,
+                    uploadId,
+                    fieldRecommendationId,
+                    certifyPractitionerId,
+                    releaseId,
                     occurredAt == null ? Instant.now() : occurredAt,
                     detail);
         }

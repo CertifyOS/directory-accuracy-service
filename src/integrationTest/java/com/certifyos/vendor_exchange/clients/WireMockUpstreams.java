@@ -8,8 +8,8 @@ import io.quarkus.test.common.QuarkusTestResourceLifecycleManager;
 import java.util.Map;
 
 /**
- * One WireMock standing in for egress and api-layer (their paths do not overlap). Same classloader
- * caveat as the DAL stand-in: the port travels through a system property.
+ * One WireMock standing in for egress, api-layer and file-ingestion (their paths do not overlap).
+ * Same classloader caveat as the DAL stand-in: the port travels through a system property.
  */
 public class WireMockUpstreams implements QuarkusTestResourceLifecycleManager {
 
@@ -24,7 +24,8 @@ public class WireMockUpstreams implements QuarkusTestResourceLifecycleManager {
         System.setProperty(PORT_PROPERTY, String.valueOf(server.port()));
         return Map.of(
                 "quarkus.rest-client.egress.url", server.baseUrl(),
-                "quarkus.rest-client.api-layer.url", server.baseUrl());
+                "quarkus.rest-client.api-layer.url", server.baseUrl(),
+                "quarkus.rest-client.file-ingestion.url", server.baseUrl());
     }
 
     @Override

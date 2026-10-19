@@ -7,6 +7,8 @@ import com.mongodb.client.model.Indexes;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
+import java.util.concurrent.TimeUnit;
+import org.bson.conversions.Bson;
 
 /**
  * Every index the design names, created on every boot of either role. Safe: MongoDB joins an
@@ -85,5 +87,105 @@ public class MongoIndexes {
                                 .name("events_received_message_unique")
                                 .unique(true)
                                 .partialFilterExpression(Filters.eq("type", "EXPORT_EVENT_RECEIVED")));
+
+        createIngestionIndexes();
+    }
+
+    private void createIngestionIndexes() {
+        // batches: the reconciler reads by updatedAt, "without progress" being a question about the last write
+        collections
+                .batches()
+                .createIndex(
+                        Indexes.ascending("inboundFiles.state", "inboundFiles.updatedAt"),
+                        new IndexOptions().name("batches_inbound_state_updated"));
+        collections
+                .batches()
+                .createIndex(
+                        Indexes.ascending("inboundFiles.externalRef"),
+                        new IndexOptions()
+                                .name("batches_inbound_external_ref")
+                                .partialFilterExpression(Filters.exists("inboundFiles.externalRef")));
+
+        // field_recommendations
+        Bson openStates = Filters.in("reviewStatus", "PENDING", "SKIPPED");
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "reviewStatus", "field", "stagedAt", "_id"),
+                        new IndexOptions().name("field_recs_open_list").partialFilterExpression(openStates));
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "exportBatchId", "reviewStatus", "field"),
+                        new IndexOptions().name("field_recs_batch_counts"));
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "practitioner.certifyPractitionerId", "exportBatchId"),
+                        new IndexOptions().name("field_recs_practitioner"));
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "practitioner.npi", "exportBatchId"),
+                        new IndexOptions().name("field_recs_npi"));
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "goldenRecordUpdate.releaseId"),
+                        new IndexOptions()
+                                .name("field_recs_release")
+                                .partialFilterExpression(Filters.exists("goldenRecordUpdate.releaseId")));
+        // the open list without a field filter
+        collections
+                .fieldRecommendations()
+                .createIndex(
+                        Indexes.ascending("tenantId", "reviewStatus", "stagedAt", "_id"),
+                        new IndexOptions()
+                                .name("field_recs_open_list_any_field")
+                                .partialFilterExpression(openStates));
+
+        // vendor_rejected_values: the only TTL index in the service (design D16, plan P4)
+        collections
+                .rejectedValues()
+                .createIndex(
+                        Indexes.ascending("expiresAt"),
+                        new IndexOptions().name("rejected_values_ttl").expireAfter(0L, TimeUnit.SECONDS));
+        collections
+                .rejectedValues()
+                .createIndex(
+                        Indexes.ascending("tenantId", "certifyPractitionerId"),
+                        new IndexOptions().name("rejected_values_practitioner"));
+
+        // vendor_unmatched_uploads
+        collections
+                .unmatchedUploads()
+                .createIndex(
+                        Indexes.ascending("resolution.kind", "receivedAt"),
+                        new IndexOptions().name("unmatched_resolution"));
+        // The operator list: one folder tenant's open rows (resolution.kind null) oldest first.
+        collections
+                .unmatchedUploads()
+                .createIndex(
+                        Indexes.ascending("folderTenant", "resolution.kind", "receivedAt", "_id"),
+                        new IndexOptions().name("unmatched_open_by_tenant"));
+
+        // vendor_review_events
+        collections
+                .reviewEvents()
+                .createIndex(
+                        Indexes.ascending("fieldRecommendationId", "_id"),
+                        new IndexOptions().name("review_events_by_field"));
+        collections
+                .reviewEvents()
+                .createIndex(
+                        Indexes.ascending("tenantId", "releaseId", "_id"),
+                        new IndexOptions()
+                                .name("review_events_by_release")
+                                .partialFilterExpression(Filters.exists("releaseId")));
+        collections
+                .reviewEvents()
+                .createIndex(
+                        Indexes.ascending("tenantId", "occurredAt"),
+                        new IndexOptions().name("review_events_by_tenant"));
     }
 }

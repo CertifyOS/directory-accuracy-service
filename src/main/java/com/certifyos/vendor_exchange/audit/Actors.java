@@ -6,11 +6,14 @@ package com.certifyos.vendor_exchange.audit;
  */
 public final class Actors {
 
-    /** The tick, the jobs and the reconciler. */
+    /** The export lane's tick, jobs and reconciler. */
     public static final String SYSTEM = "system:vendor-export";
 
     /** The egress completion event handler. */
     public static final String EGRESS_EVENT = "system:egress-event";
+
+    /** The ingestion lane's event handlers, jobs and reconciler. */
+    public static final String INGESTION = "system:vendor-ingestion";
 
     private Actors() {}
 }
