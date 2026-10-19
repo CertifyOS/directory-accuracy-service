@@ -219,14 +219,19 @@ public class AuditRepository {
 
     /**
      * A field recommendation's whole trail in the order it was written (natural {@code _id} order,
-     * as {@link #trailForBatch}).
+     * as {@link #trailForBatch}). The id arrives from a caller's URL, so the read is tenant-scoped:
+     * another tenant's id reads nothing. The {@code (fieldRecommendationId, _id)} index serves it.
      *
+     * @param tenantId the tenant
      * @param fieldRecommendationId the field recommendation
      * @param limit the most rows to return
      * @return the events, oldest first
      */
-    public List<AuditEvent> trailForField(String fieldRecommendationId, int limit) {
-        return reviewEvents(Filters.eq("fieldRecommendationId", fieldRecommendationId), limit);
+    public List<AuditEvent> trailForField(String tenantId, String fieldRecommendationId, int limit) {
+        return reviewEvents(
+                Filters.and(
+                        Filters.eq("fieldRecommendationId", fieldRecommendationId), Filters.eq("tenantId", tenantId)),
+                limit);
     }
 
     /**

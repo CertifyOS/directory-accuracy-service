@@ -55,6 +55,19 @@ class AuditEventTest {
     }
 
     @Test
+    void fieldEventNeedsThePractitionerId() {
+        IllegalArgumentException refused = Assertions.assertThrows(
+                IllegalArgumentException.class, () -> AuditEvent.of(AuditEventType.FIELD_APPROVED, "org-xyz", "candor")
+                        .actor("user:reviewer-7")
+                        .field(FIELD_ID, null)
+                        .detail("field", "phone")
+                        .detail("fromStatus", "PENDING")
+                        .detail("version", 1L)
+                        .build());
+        Assertions.assertTrue(refused.getMessage().contains("certifyPractitionerId"), refused.getMessage());
+    }
+
+    @Test
     void envelopeFieldsRoundTrip() {
         AuditEvent event = AuditEvent.of(AuditEventType.FIELD_RELEASE_REQUESTED, "org-xyz", "candor")
                 .actor("user:reviewer-7")

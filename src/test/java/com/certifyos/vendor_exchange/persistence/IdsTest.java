@@ -134,4 +134,26 @@ class IdsTest {
         Assertions.assertThrows(
                 IllegalArgumentException.class, () -> Ids.rejectedValueId("t", "p", null, "phone", " "));
     }
+
+    @Test
+    void aLegWithWhitespaceIsRefusedSoTheAuditLineKeepsItsKeyValueGrammar() {
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b", "to/f 1.csv", "1"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.uploadId("b", "o", "1\n"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.externalRef("b\tx", "1"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.fieldRecommendationId("t", "s", "b", "p", "l 1", "phone"));
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.rejectedValueId("t", "p\u00a0q", null, "phone", "value"));
+        Assertions.assertTrue(
+                Ids.rejectedValueId("t", "p", null, "phone", "a value with spaces")
+                        .startsWith("t|p|-|phone|"),
+                "the hashed value may contain whitespace");
+    }
+
+    @Test
+    void aLocationLegOfALiteralDashIsRefusedBecauseDashMeansNoLocation() {
+        Assertions.assertThrows(
+                IllegalArgumentException.class, () -> Ids.fieldRecommendationId("t", "s", "b", "p", "-", "phone"));
+        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.rejectedValueId("t", "p", "-", "phone", "v"));
+    }
 }

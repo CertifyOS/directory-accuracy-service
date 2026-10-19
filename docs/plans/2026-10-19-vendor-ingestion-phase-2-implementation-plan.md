@@ -95,7 +95,7 @@ src/main/java/com/certifyos/vendor_exchange/
   config/MongoIndexes.java                  + ingestion indexes, the one TTL index
   persistence/Collections.java              + fieldRecommendations, unmatchedUploads, rejectedValues, reviewEvents, all()
   persistence/Ids.java                      + uploadId, externalRef, fieldRecommendationId, rejectedValueId, releaseId
-  audit/AuditEventType.java                 + Scope.FIELD; 13 INBOUND_* types, 7 FIELD_* types
+  audit/AuditEventType.java                 + Scope.FIELD; 12 INBOUND_* types, 7 FIELD_* types
   audit/AuditDetailContract.java            + the design's per-event keys; EXPORT_BATCH_ACKNOWLEDGED keys corrected
   audit/AuditEvent.java                     + uploadId, fieldRecommendationId, certifyPractitionerId, releaseId (optional)
   audit/AuditRepository.java                + routing by scope, trailForField, findForRelease; ALERT_KEYS additions

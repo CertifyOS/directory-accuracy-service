@@ -21,6 +21,7 @@ public final class Ids {
     private static final Pattern NO_UNDERSCORE = Pattern.compile("^[A-Za-z0-9-]+$");
     private static final Pattern VENDOR = Pattern.compile("^[a-z0-9-]+$");
     private static final Pattern NPI = Pattern.compile("^\\d{10}$");
+    private static final String NO_VALUE = "-";
 
     private Ids() {}
 
@@ -168,8 +169,9 @@ public final class Ids {
     /**
      * Rejected value id: four readable legs, then the SHA-256 of the normalised value, so the raw
      * value never appears in an id or a log line. The four readable legs are refused when null,
-     * blank or containing {@code |}. The normalised value is refused only when null or blank; it
-     * may contain {@code |} (a location composite, a specialty list) because it is hashed.
+     * blank or containing {@code |} or whitespace, and a location of {@code -} is refused because
+     * {@code -} means none. The normalised value is refused only when null or blank; it may contain
+     * {@code |} or whitespace (a location composite, a specialty list) because it is hashed.
      *
      * @param tenantId the tenant
      * @param certifyPractitionerId the practitioner
@@ -196,10 +198,21 @@ public final class Ids {
         return String.join("|", legs);
     }
 
+    /** A leg that may be absent, written {@code -}; a real value of {@code -} would collide with it. */
     private static String optionalLeg(String name, String value) {
-        return value == null ? "-" : leg(name, value);
+        if (value == null) {
+            return NO_VALUE;
+        }
+        if (NO_VALUE.equals(value)) {
+            throw new IllegalArgumentException(name + " must not be '" + NO_VALUE + "', which means absent");
+        }
+        return leg(name, value);
     }
 
+    /**
+     * A readable leg: not blank, no {@code |} (the separator) and no whitespace, so an id printed on
+     * the {@code AUDIT} line keeps that line's {@code key=value} grammar.
+     */
     private static String leg(String name, String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(name + " must not be null or blank");
@@ -207,7 +220,14 @@ public final class Ids {
         if (value.indexOf('|') >= 0) {
             throw new IllegalArgumentException(name + " must not contain '|'");
         }
+        if (value.codePoints().anyMatch(Ids::isWhitespace)) {
+            throw new IllegalArgumentException(name + " must not contain whitespace");
+        }
         return value;
+    }
+
+    private static boolean isWhitespace(int codePoint) {
+        return Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
     }
 
     private static String requireValue(String value) {

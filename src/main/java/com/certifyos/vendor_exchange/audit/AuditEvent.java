@@ -24,7 +24,8 @@ import org.bson.Document;
  * @param uploadId the vendor upload a file or field event belongs to, or null
  * @param fieldRecommendationId the field recommendation; required for {@link AuditEventType.Scope#FIELD}
  *     events, null otherwise
- * @param certifyPractitionerId the practitioner a field event is about, or null
+ * @param certifyPractitionerId the practitioner a field event is about; required for {@link
+ *     AuditEventType.Scope#FIELD} events, null otherwise
  * @param releaseId the release a field event belongs to, set from the release request on, or null
  * @param occurredAt when it happened
  * @param detail the per-type payload, immutable
@@ -50,6 +51,9 @@ public record AuditEvent(
         requireIds(type, tenantId, vendor, exportBatchId);
         if (type.requiresField() && fieldRecommendationId == null) {
             throw new IllegalArgumentException(type + " requires fieldRecommendationId");
+        }
+        if (type.requiresField() && certifyPractitionerId == null) {
+            throw new IllegalArgumentException(type + " requires certifyPractitionerId");
         }
         detail = detail == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(detail));
     }

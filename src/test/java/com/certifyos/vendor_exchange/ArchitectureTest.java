@@ -168,9 +168,9 @@ class ArchitectureTest {
      * The two audit collections, {@code vendor_export_events} ({@code events()}) and {@code
      * vendor_review_events} ({@code reviewEvents()}), are append-only (designs, Audit trail): the
      * repository may insert and read, never update, replace or delete. Two halves: the audit
-     * package calls no write method, and no class outside it reaches either collection, except
-     * the accessor class itself and the index setup. Retention is a platform matter; nothing in
-     * code shortens it.
+     * package calls no write method, and no class outside it reaches either collection, directly or
+     * through {@code all()}, except the accessor class itself and the index setup. Retention is a
+     * platform matter; nothing in code shortens it.
      */
     @ArchTest
     static final ArchRule auditIsAppendOnly = CompositeArchRule.of(ArchRuleDefinition.noClasses()
@@ -188,5 +188,7 @@ class ArchitectureTest {
                     .callMethod(Collections.class, "events")
                     .orShould()
                     .callMethod(Collections.class, "reviewEvents")
+                    .orShould()
+                    .callMethod(Collections.class, "all")
                     .allowEmptyShould(true));
 }

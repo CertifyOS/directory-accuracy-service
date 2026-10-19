@@ -190,8 +190,10 @@ public class AuditRepositoryIT {
         Assertions.assertEquals(fieldId, stored.getString("fieldRecommendationId"));
         Assertions.assertEquals("cert-000123", stored.getString("certifyPractitionerId"));
 
-        List<AuditEvent> trail = audit.trailForField(fieldId, 10);
+        List<AuditEvent> trail = audit.trailForField("aud-field", fieldId, 10);
         Assertions.assertEquals(List.of(approved, requested), trail);
+        Assertions.assertEquals(
+                List.of(), audit.trailForField("other-tenant", fieldId, 10), "another tenant reads no field trail");
         Assertions.assertEquals(List.of(requested), audit.findForRelease("aud-field", "aud-field-rel-1", 10));
         Assertions.assertEquals(List.of(), audit.findForRelease("other-tenant", "aud-field-rel-1", 10));
         Assertions.assertEquals(List.of(), audit.findForBatch(batchId, 10), "batch trail reads export events only");
