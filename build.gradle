@@ -35,6 +35,8 @@ dependencies {
     implementation libs.google.auth.oauth2.http
     // UUIDv7 for event ids: JDK 21's java.util.UUID has no v7 factory.
     implementation libs.java.uuid.generator
+    // Soundex for the release name-sound guard. Declared, not left transitive; the Quarkus BOM pins the version.
+    implementation libs.commons.codec
 
     testImplementation libs.bundles.quarkus.test
 }

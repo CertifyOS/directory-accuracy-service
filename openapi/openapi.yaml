@@ -37,6 +37,33 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DecisionResultView"
+    BulkReleaseAccepted:
+      type: object
+      properties:
+        releases:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReleaseSummary"
+        skipped:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkippedItem"
+    BulkReleaseRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+        versions:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        exportBatchId:
+          type: string
+        all:
+          type: boolean
     CadenceRequest:
       type: object
       properties:
@@ -179,6 +206,10 @@ components:
           type: string
         crosswalkId:
           type: string
+        sliceId:
+          type: string
+        sentAt:
+          $ref: "#/components/schemas/Instant"
         writtenAt:
           $ref: "#/components/schemas/Instant"
         deadlineJobId:
@@ -283,6 +314,28 @@ components:
       properties:
         reason:
           type: string
+    ReleaseAccepted:
+      type: object
+      properties:
+        releaseId:
+          type: string
+    ReleaseRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int64
+    ReleaseSummary:
+      type: object
+      properties:
+        releaseId:
+          type: string
+        certifyPractitionerId:
+          type: string
+        fieldRecommendationIds:
+          type: array
+          items:
+            type: string
     RetryResponse:
       type: object
       properties:
@@ -292,6 +345,14 @@ components:
           type: integer
           format: int32
         jobId:
+          type: string
+    RollbackRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int64
+        reason:
           type: string
     RunNowResponse:
       type: object
@@ -338,6 +399,13 @@ components:
           $ref: "#/components/schemas/Instant"
         updatedAt:
           $ref: "#/components/schemas/Instant"
+    SkippedItem:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
     SourceFile:
       type: object
       properties:
@@ -452,6 +520,41 @@ paths:
         "503":
           description: The inbound file's ingestion request is not committed yet;
             redeliver (ARCHIVING_NOT_COMMITTED)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "400":
+          description: Bad Request
+  /internal/vendor-ingestion/ov-generated:
+    post:
+      summary: Receive a survivorship operational-value event
+      description: "Pub/Sub push endpoint for mdm.slice.ov_generated. Requires the\
+        \ subscription's OIDC identity token; reads the operational value back for\
+        \ fields released through a candor slice and answers 204 to acknowledge every\
+        \ outcome, including an event that is not ours; answers 503 while the service\
+        \ is switched off so the message is redelivered."
+      tags:
+      - internal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PubSubPushMessage"
+        required: true
+      responses:
+        "204":
+          description: Acknowledged
+        "503":
+          description: The service is switched off (SERVICE_DISABLED); Pub/Sub redelivers
+            the message
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: "Missing, rejected or not yet configured push identity (PUSH_TOKEN_REQUIRED,\
+            \ PUSH_TOKEN_REJECTED, PUSH_NOT_CONFIGURED)"
           content:
             application/problem+json:
               schema:
@@ -1859,6 +1962,146 @@ paths:
                 $ref: "#/components/schemas/Problem"
       security:
       - platform-token: []
+  /v1/vendor-review/fields/{id}/release:
+    post:
+      summary: Release one approved field
+      description: "The field must be APPROVED (or RELEASE_FAILED, for a re-release)\
+        \ at the given version, be first_name, last_name, phone or fax, and the tenant's\
+        \ survivorship ranking must name candor. Joins the practitioner's open release,\
+        \ or starts one, and enqueues its release job."
+      tags:
+      - vendor-review
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseRequest"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, VERSION_REQUIRED, REASON_REQUIRED,\
+            \ INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such field or release in the caller's tenant (FIELD_NOT_FOUND,\
+            \ RELEASE_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write, or a stale version (RELEASE_NOT_ALLOWED,\
+            \ ROLLBACK_NOT_ALLOWED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: "The field cannot be released (IN_PLACE_RELEASE_UNSUPPORTED,\
+            \ REMOVAL_NOT_RELEASED) or the tenant's survivorship ranking has no candor\
+            \ entry (RANKING_MISSING)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User or tenant configuration lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "202":
+          description: Release requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseAccepted"
+      security:
+      - platform-token: []
+  /v1/vendor-review/fields/{id}/rollback:
+    post:
+      summary: Roll back an approval
+      description: "APPROVED to PENDING at the given version, with the reason in the\
+        \ history. Refused once a release was requested."
+      tags:
+      - vendor-review
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RollbackRequest"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, VERSION_REQUIRED, REASON_REQUIRED,\
+            \ INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such field or release in the caller's tenant (FIELD_NOT_FOUND,\
+            \ RELEASE_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write, or a stale version (RELEASE_NOT_ALLOWED,\
+            \ ROLLBACK_NOT_ALLOWED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: "The field cannot be released (IN_PLACE_RELEASE_UNSUPPORTED,\
+            \ REMOVAL_NOT_RELEASED) or the tenant's survivorship ranking has no candor\
+            \ entry (RANKING_MISSING)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User or tenant configuration lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
   /v1/vendor-review/npis/{npi}:
     get:
       summary: Read one NPI's field recommendations
@@ -1951,6 +2194,135 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "404":
           description: Nothing of that id in the caller's tenant (PRACTITIONER_NOT_FOUND)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+      security:
+      - platform-token: []
+  /v1/vendor-review/releases:
+    post:
+      summary: Release many approved fields
+      description: "Either ids with their versions (at most releaseBulkMax), or exportBatchId\
+        \ with all = true for every APPROVED slice field of the batch. Fields are\
+        \ grouped per practitioner into one release each; an item a single request\
+        \ would refuse is listed under skipped with its code."
+      tags:
+      - vendor-review
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkReleaseRequest"
+        required: true
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, VERSION_REQUIRED, REASON_REQUIRED,\
+            \ INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such field or release in the caller's tenant (FIELD_NOT_FOUND,\
+            \ RELEASE_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write, or a stale version (RELEASE_NOT_ALLOWED,\
+            \ ROLLBACK_NOT_ALLOWED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: "The field cannot be released (IN_PLACE_RELEASE_UNSUPPORTED,\
+            \ REMOVAL_NOT_RELEASED) or the tenant's survivorship ranking has no candor\
+            \ entry (RANKING_MISSING)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User or tenant configuration lookup failed (DAL_UNAVAILABLE)
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "202":
+          description: Releases requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkReleaseAccepted"
+      security:
+      - platform-token: []
+  /v1/vendor-review/releases/{releaseId}:
+    get:
+      summary: Read a release
+      description: "Every field carrying the release id, with its review state and,\
+        \ once read back, its outcome (WON, OUTRANKED, NOT_APPLIED, UNKNOWN) and winning\
+        \ source."
+      tags:
+      - vendor-review
+      parameters:
+      - name: releaseId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "400":
+          description: "Invalid request (TENANT_REQUIRED, VERSION_REQUIRED, REASON_REQUIRED,\
+            \ INVALID_REQUEST)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: No or invalid platform token
+        "403":
+          description: "Caller holds no role in the tenant (TENANT_FORBIDDEN, TENANT_UNRESOLVED)\
+            \ or lacks the permission (PERMISSION_DENIED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: "No such field or release in the caller's tenant (FIELD_NOT_FOUND,\
+            \ RELEASE_NOT_FOUND)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "Not in a state that allows the write, or a stale version (RELEASE_NOT_ALLOWED,\
+            \ ROLLBACK_NOT_ALLOWED)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          description: "The field cannot be released (IN_PLACE_RELEASE_UNSUPPORTED,\
+            \ REMOVAL_NOT_RELEASED) or the tenant's survivorship ranking has no candor\
+            \ entry (RANKING_MISSING)"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: User or tenant configuration lookup failed (DAL_UNAVAILABLE)
           content:
             application/problem+json:
               schema:

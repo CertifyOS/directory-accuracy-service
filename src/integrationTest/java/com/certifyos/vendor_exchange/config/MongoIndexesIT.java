@@ -215,6 +215,22 @@ public class MongoIndexesIT {
         assertKey(reviewEvents, "review_events_by_tenant", new Document("tenantId", 1).append("occurredAt", 1));
     }
 
+    @Test
+    void releaseReadBackIndexExists() {
+        Map<String, Document> recommendations = byName(collections.fieldRecommendations());
+        assertKey(
+                recommendations,
+                "field_recs_releasing_location",
+                new Document("tenantId", 1).append("location.certifyLocationId", 1));
+        Assertions.assertEquals(
+                new Document("reviewStatus", "RELEASING"),
+                recommendations.get("field_recs_releasing_location").get("partialFilterExpression", Document.class));
+        assertKey(recommendations, "field_recs_release_requested", new Document("updatedAt", 1));
+        Assertions.assertEquals(
+                new Document("reviewStatus", "RELEASE_REQUESTED"),
+                recommendations.get("field_recs_release_requested").get("partialFilterExpression", Document.class));
+    }
+
     private static void assertKey(Map<String, Document> found, String name, Document key) {
         Assertions.assertNotNull(found.get(name), "missing index " + name);
         Assertions.assertEquals(key, found.get(name).get("key"), name);

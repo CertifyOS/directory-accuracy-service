@@ -12,9 +12,12 @@ public enum Permission {
     READ("vendor-export", "read"),
     /** Read field recommendations and their review trail. */
     REVIEW_READ("vendor-review", "read"),
-    /** Approve, reject, skip and roll back field recommendations. */
+    /** Approve, reject and skip field recommendations. */
     REVIEW_DECIDE("vendor-review", "decide"),
-    /** Release approved field recommendations to the directory. */
+    /**
+     * Release approved field recommendations to the directory, and roll an approval back before its
+     * release (design: {@code vendor-review:release} covers release and rollback).
+     */
     REVIEW_RELEASE("vendor-review", "release");
 
     private final String resource;

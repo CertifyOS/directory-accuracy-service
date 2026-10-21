@@ -4,6 +4,7 @@ import com.certifyos.vendor_exchange.MongoResource;
 import com.certifyos.vendor_exchange.WorkerTestProfile;
 import com.certifyos.vendor_exchange.export.jobs.ReconcilerJob;
 import com.certifyos.vendor_exchange.ingestion.jobs.InboundReconcilerJob;
+import com.certifyos.vendor_exchange.ingestion.jobs.ReleaseReconcilerJob;
 import com.mongodb.client.MongoClient;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -72,6 +73,11 @@ public class WorkerRoleBootIT {
                 .filter(job -> job.getId().equals(ReconcilerJob.RECURRING_ID))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no " + ReconcilerJob.RECURRING_ID + " in " + recurring));
+        RecurringJob releaseReconciler = recurring.stream()
+                .filter(job -> job.getId().equals(ReleaseReconcilerJob.RECURRING_ID))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no " + ReleaseReconcilerJob.RECURRING_ID + " in " + recurring));
+        Assertions.assertEquals(ReleaseReconcilerJob.CRON, releaseReconciler.getScheduleExpression());
         Assertions.assertEquals(InboundReconcilerJob.CRON, inboundReconciler.getScheduleExpression());
         Assertions.assertEquals(ReconcilerJob.CRON, exportReconciler.getScheduleExpression());
         Assertions.assertEquals(
