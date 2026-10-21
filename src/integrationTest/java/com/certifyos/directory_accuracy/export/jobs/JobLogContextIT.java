@@ -4,7 +4,6 @@ import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.WorkerTestProfile;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -36,8 +35,7 @@ import org.junit.jupiter.api.Test;
 @TestProfile(WorkerTestProfile.class)
 class JobLogContextIT {
 
-    static final SelectionCriteria CRITERIA = new SelectionCriteria(List.of(
-            new SelectionCriteria.Clause("data.delegationStatus", SelectionCriteria.Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
 
     @Inject
     ExportBatchRepository batches;
@@ -72,13 +70,13 @@ class JobLogContextIT {
     @Test
     void jobLogLinesCarryBatchTenantAndJobId() {
         ExportBatch batch =
-                ExportBatch.scheduled("mdc-tenant", "candor", YearMonth.of(2026, 10), 1, CRITERIA, Instant.now());
+                ExportBatch.scheduled("mdc-tenant", "candor", YearMonth.of(2026, 10), 1, FILTER_ID, Instant.now());
         transactions.run(session -> {
             batches.insert(session, batch);
             return null;
         });
 
-        UUID jobId = enqueuer.select(batch.id(), 1);
+        UUID jobId = enqueuer.requestEgress(batch.id(), 1);
 
         Awaitility.await().atMost(Duration.ofSeconds(30)).until(() -> startLine(batch.id())
                 .isPresent());

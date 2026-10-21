@@ -10,9 +10,6 @@ import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
 import com.certifyos.directory_accuracy.export.schedule.Cadence;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Filters;
@@ -32,7 +29,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * The tick body on the api role: the background server is off, so an enqueued select job stays
+ * The tick body on the api role: the background server is off, so an enqueued egress request job stays
  * {@code ENQUEUED} in storage where the test can see it. Other classes leave due schedules behind
  * in the shared database, so every assertion filters on this class's tenants.
  */
@@ -41,8 +38,7 @@ import org.junit.jupiter.api.Test;
 @TestProfile(ApiTestProfile.class)
 public class TickJobIT {
 
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
     static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
 
     @Inject
@@ -69,7 +65,7 @@ public class TickJobIT {
                 "candor",
                 Cadence.monthly(1),
                 zone,
-                CRITERIA,
+                FILTER_ID,
                 "tpl-" + tenantId,
                 nextDueAt,
                 "user:ops",
@@ -117,7 +113,7 @@ public class TickJobIT {
             Assertions.assertEquals(BatchState.SCHEDULED, batch.state());
             Assertions.assertEquals(1, batch.seq());
             Assertions.assertEquals(1, batch.attempt());
-            Assertions.assertEquals(CRITERIA, batch.selection().criteria(), "the criteria are copied at creation");
+            Assertions.assertEquals(FILTER_ID, batch.selection().filterId(), "the filter id is copied at creation");
 
             Schedule after = schedules.find(entry.tenantId(), "candor").orElseThrow();
             Assertions.assertTrue(after.nextDueAt().isAfter(before), "nextDueAt advanced into the future");
@@ -142,7 +138,7 @@ public class TickJobIT {
             Assertions.assertEquals(
                     StateName.ENQUEUED,
                     storage.getJobById(UUID.fromString(entry.jobId())).getState(),
-                    "the select job is enqueued once the transaction committed");
+                    "the egress request job is enqueued once the transaction committed");
         }
         Assertions.assertTrue(
                 collections
@@ -172,7 +168,7 @@ public class TickJobIT {
         Schedule schedule = dueSchedule("tick-dup", ZoneId.of("UTC"), due);
         YearMonth period = YearMonth.from(due.atZone(ZoneId.of("UTC")));
         transactions.run(session -> {
-            batches.insert(session, ExportBatch.scheduled("tick-dup", "candor", period, 1, CRITERIA, Instant.now()));
+            batches.insert(session, ExportBatch.scheduled("tick-dup", "candor", period, 1, FILTER_ID, Instant.now()));
             return null;
         });
 
@@ -200,7 +196,7 @@ public class TickJobIT {
                 "candor",
                 Cadence.cron("0 0 * * 1"),
                 ZoneId.of("UTC"),
-                CRITERIA,
+                FILTER_ID,
                 "tpl",
                 due,
                 "user:ops",

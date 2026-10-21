@@ -11,7 +11,6 @@ import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import io.quarkus.test.InjectMock;
@@ -45,9 +44,6 @@ class DeadlineCheckJobIT {
     ExportBatchRepository batches;
 
     @Inject
-    ExportNpiRepository npis;
-
-    @Inject
     AuditRepository audit;
 
     @Inject
@@ -72,7 +68,6 @@ class DeadlineCheckJobIT {
         return EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 tenant,
                 BatchState.EGRESS_REQUESTED,
                 2,
@@ -224,7 +219,6 @@ class DeadlineCheckJobIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 "dl-noop",
                 BatchState.EGRESS_COMPLETED,
                 1,

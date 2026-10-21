@@ -18,7 +18,7 @@ public final class AuditDetailContract {
     private static final Map<AuditEventType, Set<String>> REQUIRED = new EnumMap<>(AuditEventType.class);
 
     static {
-        require(AuditEventType.SCHEDULE_CREATED, "cadence", "timezone", "selection", "egressTemplateId", "nextDueAt");
+        require(AuditEventType.SCHEDULE_CREATED, "cadence", "timezone", "filterId", "egressTemplateId", "nextDueAt");
         require(AuditEventType.SCHEDULE_UPDATED, "version", "changes", "nextDueAtBefore", "nextDueAtAfter");
         require(AuditEventType.SCHEDULE_ENABLED, "reason", "catchUp", "nextDueAt");
         require(AuditEventType.SCHEDULE_RUN_NOW, "period", "exportBatchId");
@@ -37,14 +37,13 @@ public final class AuditDetailContract {
                 "trigger",
                 "nextDueAt",
                 "scheduleVersion");
-        require(AuditEventType.NPIS_REGISTERED, "page", "count", "firstNpi", "lastNpi");
-        require(AuditEventType.EXPORT_SELECTION_COMPLETED, "criteria", "pages", "practitionersSelected", "durationMs");
-        require(AuditEventType.EXPORT_BATCH_EMPTY, "criteria");
+        require(AuditEventType.EXPORT_BATCH_EMPTY, "filterId", "failureReason", "completionSource");
         require(
                 AuditEventType.EXPORT_EGRESS_REQUESTED,
                 "egressCorrelationId",
                 "templateId",
-                "npiCount",
+                "filterId",
+                "reuseSelectionFrom",
                 "egressResponse",
                 "deadlineAt");
         require(
@@ -59,7 +58,7 @@ public final class AuditDetailContract {
         require(AuditEventType.EXPORT_EVENT_MISSED, "check", "phaseFound", "hoursSinceRequest");
         require(AuditEventType.EXPORT_EGRESS_STALE, "check", "phaseLastSeen", "hoursWaiting");
         require(AuditEventType.EXPORT_EGRESS_COMPLETED, "outputUri", "totalRecords", "waitSeconds", "completionSource");
-        require(AuditEventType.NPIS_RECONCILED, "registered", "inFile", "match");
+        require(AuditEventType.EXPORT_RECONCILED, "selected", "inFile", "match");
         require(
                 AuditEventType.EXPORT_BATCH_DELIVERED,
                 "deliveredAt",

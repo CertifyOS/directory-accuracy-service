@@ -1,7 +1,6 @@
 package com.certifyos.directory_accuracy.clients;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import java.util.List;
 
 /**
  * The egress export request from the design's contracts (step 3). Field names are egress's own
@@ -22,17 +21,12 @@ public record EgressExportRequest(
         String separator,
         String outputFormat,
         String rowExpansionKeys,
-        List<String> npiFilter,
         Selection selection,
         String userId,
         Destination destination) {
 
     /** The entity type this service exports. */
     public static final String PRACTITIONER = "practitioner";
-
-    public EgressExportRequest {
-        npiFilter = npiFilter == null ? List.of() : List.copyOf(npiFilter);
-    }
 
     /**
      * The saved-filter selection. {@code listUsed} is always true: egress writes the list it

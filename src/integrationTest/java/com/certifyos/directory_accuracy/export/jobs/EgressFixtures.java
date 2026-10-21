@@ -4,11 +4,6 @@ import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpi;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Updates;
 import java.time.Instant;
@@ -19,8 +14,7 @@ import java.util.UUID;
 /** Batches in the states the completion tests start from, with the egress details the request job would have written. */
 public final class EgressFixtures {
 
-    public static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    public static final String FILTER_ID = "flt-direct";
     public static final YearMonth PERIOD = YearMonth.of(2026, 10);
     public static final String BUCKET = "test-vendor-bucket";
 
@@ -48,50 +42,40 @@ public final class EgressFixtures {
     }
 
     /**
-     * Inserts a batch, registers {@code npiCount} NPIs and walks it to {@code target} with the
-     * egress details set; {@code file.name} and {@code file.path} as the pin writes them.
+     * Inserts a batch and walks it to {@code target} with the egress details set; {@code file.name}
+     * and {@code file.path} as the pin writes them. {@code SCHEDULED} is the pinned batch the
+     * request job sees on a retry; from {@code EGRESS_COMPLETED} on, egress's counts are recorded
+     * with {@code selected} as {@code selection.distinct}, unless it is negative (the event carried
+     * no counts).
      */
     public static ExportBatch batchIn(
             Transactions transactions,
             ExportBatchRepository batches,
-            ExportNpiRepository npis,
             String tenant,
             BatchState target,
-            int npiCount,
+            int selected,
             Instant requestedAt) {
-        return batchIn(transactions, batches, npis, tenant, "candor", target, npiCount, requestedAt);
+        return batchIn(transactions, batches, tenant, "candor", target, selected, requestedAt);
     }
 
-    /** As {@link #batchIn(Transactions, ExportBatchRepository, ExportNpiRepository, String, BatchState, int, Instant)}, for a vendor. */
+    /** As {@link #batchIn(Transactions, ExportBatchRepository, String, BatchState, int, Instant)}, for a vendor. */
     public static ExportBatch batchIn(
             Transactions transactions,
             ExportBatchRepository batches,
-            ExportNpiRepository npis,
             String tenant,
             String vendor,
             BatchState target,
-            int npiCount,
+            int selected,
             Instant requestedAt) {
-        ExportBatch batch = ExportBatch.scheduled(tenant, vendor, PERIOD, 1, CRITERIA, requestedAt.minusSeconds(60));
+        ExportBatch batch = ExportBatch.scheduled(tenant, vendor, PERIOD, 1, FILTER_ID, requestedAt.minusSeconds(60));
         EgressDetails egress = requested(tenant, batch.id(), 1, requestedAt);
         transactions.run(session -> {
             batches.insert(session, batch);
-            List<ExportNpi> rows = new java.util.ArrayList<>();
-            for (int index = 0; index < npiCount; index++) {
-                rows.add(ExportNpi.of(
-                        batch.id(),
-                        tenant,
-                        String.format(java.util.Locale.ROOT, "%010d", 1000000000L + index),
-                        "p-" + index,
-                        requestedAt));
-            }
-            npis.upsertAll(session, rows);
             Instant then = requestedAt.minusSeconds(30);
-            batches.transition(session, batch.id(), BatchState.SCHEDULED, BatchState.NPIS_SELECTED, then, null);
             batches.updateInState(
                     session,
                     batch.id(),
-                    BatchState.NPIS_SELECTED,
+                    BatchState.SCHEDULED,
                     then,
                     Updates.combine(
                             Updates.set("egress", egress.toDocument()),
@@ -100,21 +84,28 @@ public final class EgressFixtures {
                                     "file.path",
                                     "gs://" + BUCKET + "/"
                                             + egress.destination().objectName())));
-            if (target == BatchState.NPIS_SELECTED) {
+            if (target == BatchState.SCHEDULED) {
                 return null;
             }
             batches.transition(
-                    session, batch.id(), BatchState.NPIS_SELECTED, BatchState.EGRESS_REQUESTED, requestedAt, null);
+                    session, batch.id(), BatchState.SCHEDULED, BatchState.EGRESS_REQUESTED, requestedAt, null);
             if (target == BatchState.EGRESS_COMPLETED) {
+                Instant completedAt = requestedAt.plusSeconds(600);
+                List<org.bson.conversions.Bson> updates = new java.util.ArrayList<>(List.of(
+                        Updates.set("egress.completedAt", completedAt),
+                        Updates.set("egress.completionSource", "EVENT")));
+                if (selected >= 0) {
+                    updates.add(Updates.set("selection.requested", (long) selected));
+                    updates.add(Updates.set("selection.distinct", (long) selected));
+                    updates.add(Updates.set("selection.completedAt", completedAt));
+                }
                 batches.transition(
                         session,
                         batch.id(),
                         BatchState.EGRESS_REQUESTED,
                         BatchState.EGRESS_COMPLETED,
-                        requestedAt.plusSeconds(600),
-                        Updates.combine(
-                                Updates.set("egress.completedAt", requestedAt.plusSeconds(600)),
-                                Updates.set("egress.completionSource", "EVENT")));
+                        completedAt,
+                        Updates.combine(updates));
             }
             return null;
         });

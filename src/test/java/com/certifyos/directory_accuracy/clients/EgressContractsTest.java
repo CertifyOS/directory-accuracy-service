@@ -1,7 +1,6 @@
 package com.certifyos.directory_accuracy.clients;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -62,18 +61,18 @@ class EgressContractsTest {
                 ";",
                 "csv",
                 "[\"locations\"]",
-                List.of("1234567893"),
-                null,
+                EgressExportRequest.Selection.savedFilter("flt-direct"),
                 EgressClient.INITIATOR,
                 new EgressExportRequest.Destination("vendor-sftp", "from/org-a/file.csv"));
         String json = mapper.writeValueAsString(request);
-        Assertions.assertTrue(json.contains("\"npiFilter\":[\"1234567893\"]"));
+        Assertions.assertFalse(json.contains("npiFilter"), "egress refuses a selection beside an NPI list");
+        Assertions.assertTrue(json.contains("\"selection\":{\"source\":\"SAVED_FILTER\""));
         Assertions.assertTrue(
                 json.contains("\"destination\":{\"bucket\":\"vendor-sftp\",\"objectName\":\"from/org-a/file.csv\"}"));
         Assertions.assertTrue(
                 json.contains("\"rowExpansionKeys\":\"[\\\"locations\\\"]\""), "a string, as egress declares it");
         String sparse = mapper.writeValueAsString(new EgressExportRequest(
-                EgressExportRequest.PRACTITIONER, "org-a", "c", null, null, null, null, null, null, null, null, null));
+                EgressExportRequest.PRACTITIONER, "org-a", "c", null, null, null, null, null, null, null, null));
         Assertions.assertFalse(sparse.contains("templateId"), "nulls are omitted");
     }
 

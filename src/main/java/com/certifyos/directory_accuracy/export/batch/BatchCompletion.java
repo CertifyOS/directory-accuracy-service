@@ -3,6 +3,7 @@ package com.certifyos.directory_accuracy.export.batch;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
+import com.certifyos.directory_accuracy.clients.EgressSelection;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
 import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -29,6 +30,8 @@ public class BatchCompletion {
 
     public static final String EGRESS_DID_NOT_FINISH = "EGRESS_DID_NOT_FINISH";
     public static final String FILE_NOT_FOUND = "FILE_NOT_FOUND";
+    public static final String EGRESS_REFUSED = "EGRESS_REFUSED";
+    public static final String SELECTION_COUNTS_MISSING = "SELECTION_COUNTS_MISSING";
 
     private static final Logger LOG = Logger.getLogger(BatchCompletion.class);
 
@@ -187,30 +190,41 @@ public class BatchCompletion {
 
     /**
      * The file is verified at the destination: {@code EGRESS_COMPLETED} to {@code DELIVERED} with
-     * the file facts, the count reconciliation, who produced the file, {@code NPIS_RECONCILED} and
+     * the file facts, the count reconciliation, who produced the file, {@code EXPORT_RECONCILED} and
      * {@code EXPORT_BATCH_DELIVERED}; the pending deadline check is deleted.
      *
      * @param batch the batch
      * @param file the delivered file's facts
-     * @param reconciliation registered against in-file counts
+     * @param reconciliation selected against in-file counts
      * @param fileProducedBy the correlation id egress stamped on the object, or null
+     * @param countsFromStatus egress's selection block when the finish job had to read it from the
+     *     status (the batch held no counts yet), recorded with the delivery; null otherwise
      * @param now the time of the write, which is {@code deliveredAt}
      * @return true when the batch was moved
      */
     public boolean delivered(
-            ExportBatch batch, FileDetails file, Reconciliation reconciliation, String fileProducedBy, Instant now) {
-        Bson updates = Updates.combine(
+            ExportBatch batch,
+            FileDetails file,
+            Reconciliation reconciliation,
+            String fileProducedBy,
+            EgressSelection countsFromStatus,
+            Instant now) {
+        List<Bson> changes = new java.util.ArrayList<>(List.of(
                 Updates.set("file", file.toDocument()),
                 Updates.set("reconciliation", reconciliation.toDocument()),
                 Updates.set("deliveredAt", now),
-                Updates.set("egress.fileProducedBy", fileProducedBy));
+                Updates.set("egress.fileProducedBy", fileProducedBy)));
+        if (countsFromStatus != null) {
+            changes.addAll(selectionUpdates(countsFromStatus, now));
+        }
+        Bson updates = Updates.combine(changes);
         String source = batch.egress().completionSource() == null
                 ? null
                 : batch.egress().completionSource().name();
         AuditEvent reconciled = AuditEvent.forBatch(
-                        AuditEventType.NPIS_RECONCILED, batch.tenantId(), batch.vendor(), batch.id(), batch.attempt())
+                        AuditEventType.EXPORT_RECONCILED, batch.tenantId(), batch.vendor(), batch.id(), batch.attempt())
                 .occurredAt(now)
-                .detail("registered", reconciliation.registered())
+                .detail("selected", reconciliation.selected())
                 .detail("inFile", reconciliation.inFile())
                 .detail("match", reconciliation.match())
                 .detail("fileProducedBy", fileProducedBy)
@@ -237,12 +251,30 @@ public class BatchCompletion {
         if (!reconciliation.match()) {
             metrics.reconcileMismatch(batch.tenantId());
             LOG.warnf(
-                    "%s DELIVERED with a count mismatch: registered %d, in file %d",
-                    batch.id(), reconciliation.registered(), reconciliation.inFile());
+                    "%s DELIVERED with a count mismatch: selected %d, in file %d",
+                    batch.id(), reconciliation.selected(), reconciliation.inFile());
         } else {
-            LOG.infof("%s DELIVERED, %d practitioners reconciled", batch.id(), reconciliation.registered());
+            LOG.infof("%s DELIVERED, %d practitioners reconciled", batch.id(), reconciliation.selected());
         }
         return true;
+    }
+
+    /**
+     * The writes that record egress's selection block on the batch.
+     *
+     * @param selection the block from the event or the status
+     * @param now when it was recorded
+     * @return the {@code selection.*} updates; the filter id and {@code reEvaluated} are left as they are
+     */
+    public static List<Bson> selectionUpdates(EgressSelection selection, Instant now) {
+        return List.of(
+                Updates.set("selection.requested", selection.requested()),
+                Updates.set("selection.distinct", selection.distinct()),
+                Updates.set("selection.unmatched", selection.unmatched()),
+                Updates.set("selection.parts", selection.parts()),
+                Updates.set("selection.reusedFrom", selection.reusedFrom()),
+                Updates.set("selection.listUsedUri", selection.listUsedUri()),
+                Updates.set("selection.completedAt", now));
     }
 
     /**

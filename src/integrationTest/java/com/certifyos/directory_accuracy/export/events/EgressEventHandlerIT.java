@@ -11,7 +11,6 @@ import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.export.jobs.FinishJob;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
@@ -49,9 +48,6 @@ class EgressEventHandlerIT {
     ExportBatchRepository batches;
 
     @Inject
-    ExportNpiRepository npis;
-
-    @Inject
     AuditRepository audit;
 
     @Inject
@@ -78,7 +74,6 @@ class EgressEventHandlerIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 tenant,
                 BatchState.EGRESS_REQUESTED,
                 3,
@@ -223,7 +218,6 @@ class EgressEventHandlerIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 "evt-late",
                 BatchState.EGRESS_COMPLETED,
                 1,

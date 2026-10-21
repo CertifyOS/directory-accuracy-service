@@ -13,14 +13,9 @@ import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpi;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.schedule.Cadence;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
@@ -57,8 +52,7 @@ import org.mockito.Mockito;
 @TestProfile(ApiTestProfile.class)
 class RequestEgressJobIT {
 
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
     static final YearMonth PERIOD = YearMonth.of(2026, 10);
     static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     static final String EXPORT = "/api/v1/egress/export";
@@ -75,9 +69,6 @@ class RequestEgressJobIT {
 
     @Inject
     ExportBatchRepository batches;
-
-    @Inject
-    ExportNpiRepository npis;
 
     @Inject
     ScheduleRepository schedules;
@@ -110,33 +101,26 @@ class RequestEgressJobIT {
         WireMockUpstreams.resetRequests();
     }
 
-    private ExportBatch selected(String tenant, int attempt, EgressDetails priorEgress) {
+    private ExportBatch scheduled(String tenant, int attempt, EgressDetails priorEgress) {
         Schedule schedule = Schedule.create(
                 tenant,
                 "candor",
                 Cadence.monthly(1),
                 NEW_YORK,
-                CRITERIA,
+                FILTER_ID,
                 "tpl-1",
                 Instant.now().plusSeconds(86400),
                 "user:ops",
                 Instant.now());
-        ExportBatch batch = ExportBatch.scheduled(tenant, "candor", PERIOD, 1, CRITERIA, Instant.now());
+        ExportBatch batch = ExportBatch.scheduled(tenant, "candor", PERIOD, 1, FILTER_ID, Instant.now());
         transactions.run(session -> {
             schedules.insert(session, schedule);
             batches.insert(session, batch);
-            npis.upsertAll(
-                    session,
-                    List.of(
-                            ExportNpi.of(batch.id(), tenant, "2345678918", "p-2", Instant.now()),
-                            ExportNpi.of(batch.id(), tenant, "1234567893", "p-1", Instant.now())));
-            batches.transition(
-                    session, batch.id(), BatchState.SCHEDULED, BatchState.NPIS_SELECTED, Instant.now(), null);
             Document egress = priorEgress == null ? null : priorEgress.toDocument();
             batches.updateInState(
                     session,
                     batch.id(),
-                    BatchState.NPIS_SELECTED,
+                    BatchState.SCHEDULED,
                     Instant.now(),
                     egress == null
                             ? Updates.set("attempt", attempt)
@@ -179,19 +163,47 @@ class RequestEgressJobIT {
                         String.format(ACCEPTED, tenant, correlationId, tenant, correlationId), 202)));
     }
 
-    private static String expectedBody(String tenant, String batchId, String correlationId, String objectName) {
+    /** The first attempt's selection: the saved filter, list-used file on. */
+    static final String BY_FILTER =
+            "{\"source\":\"SAVED_FILTER\",\"filterId\":\"" + FILTER_ID + "\",\"listUsed\":true}";
+
+    /** A retry's selection: the prior attempt's frozen list, list-used file on. */
+    private static String reusing(String priorCorrelationId) {
+        return "{\"listUsed\":true,\"reuseSelectionFrom\":\"" + priorCorrelationId + "\"}";
+    }
+
+    private static String expectedBody(String tenant, String correlationId, String objectName, String selection) {
         return "{\"type\":\"practitioner\",\"tenantId\":\"" + tenant + "\",\"correlationId\":\"" + correlationId + "\","
                 + "\"templateId\":\"tpl-1\",\"mappingsCsvUrl\":\"gs://egress-templates/" + tenant
                 + "/tpl-1/v3/mappings.csv\","
                 + "\"separator\":\";\",\"outputFormat\":\"csv\",\"rowExpansionKeys\":\"[\\\"locations\\\"]\","
-                + "\"npiFilter\":[\"1234567893\",\"2345678918\"],\"userId\":\"directory-accuracy-worker\","
+                + "\"selection\":" + selection + ",\"userId\":\"directory-accuracy-worker\","
                 + "\"destination\":{\"bucket\":\"test-vendor-bucket\",\"objectName\":\"" + objectName + "\"}}";
+    }
+
+    private static void stubCancelAccepted(String tenant, String priorCorrelationId) {
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(
+                        "/api/v1/egress/jobs/practitioner/" + tenant + "/" + priorCorrelationId + "/cancel"))
+                .willReturn(WireMock.jsonResponse("{\"status\":\"cancellation_requested\"}", 202)));
+    }
+
+    private static void stubExportRefused(String tenant, int status, String error, String message) {
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
+                .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
+                .willReturn(WireMock.jsonResponse(
+                        "{\"error\":\"" + error + "\",\"message\":\"" + message + "\",\"details\":null,"
+                                + "\"retryable\":false}",
+                        status)));
+    }
+
+    private List<AuditEventType> auditTypes(ExportBatch batch) {
+        return audit.findForBatch(batch.id(), 20).stream().map(AuditEvent::type).toList();
     }
 
     @Test
     void firstAttemptPinsRequestsSchedulesTheDeadlineAndAudits() {
         String tenant = "req-first";
-        ExportBatch batch = selected(tenant, 1, null);
+        ExportBatch batch = scheduled(tenant, 1, null);
         String correlationId = batch.id() + "-r1";
         stubTemplate(tenant);
         stubExportAccepted(tenant, correlationId);
@@ -199,7 +211,7 @@ class RequestEgressJobIT {
         String today = LocalDate.now(NEW_YORK).toString().replace("-", "");
         String objectName = "from/" + tenant + "/" + tenant + "_" + batch.id() + "_" + today + ".csv";
 
-        job.run(new RequestEgressJobRequest(batch.id(), 1));
+        job.run(new RequestEgressJobRequest(batch.id(), 1, 0));
 
         WireMockUpstreams.verify(
                 1,
@@ -207,7 +219,7 @@ class RequestEgressJobIT {
                         .withHeader("Authorization", WireMock.equalTo("Bearer egress-token"))
                         .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
                         .withRequestBody(WireMock.equalToJson(
-                                expectedBody(tenant, batch.id(), correlationId, objectName), true, false)));
+                                expectedBody(tenant, correlationId, objectName, BY_FILTER), true, false)));
         ExportBatch after = batches.find(batch.id()).orElseThrow();
         Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
         Assertions.assertEquals(correlationId, after.egress().correlationId());
@@ -242,21 +254,21 @@ class RequestEgressJobIT {
                 .orElseThrow();
         Assertions.assertEquals(correlationId, event.detail().get("egressCorrelationId"));
         Assertions.assertEquals("tpl-1", event.detail().get("templateId"));
-        Assertions.assertEquals(2, event.detail().get("npiCount"));
+        Assertions.assertEquals(FILTER_ID, event.detail().get("filterId"));
+        Assertions.assertFalse(event.detail().containsKey("reuseSelectionFrom"), "a first attempt reuses nothing");
+        Assertions.assertNull(after.selection().reEvaluated());
         Assertions.assertNotNull(event.detail().get("deadlineAt"));
     }
 
     @Test
-    void secondAttemptCancelsThePriorCorrelationFirstAndKeepsThePin() {
+    void secondAttemptCancelsThePriorCorrelationFirstKeepsThePinAndReusesItsList() {
         String tenant = "req-retry";
         String batchId = tenant + "-candor-2026-10-001";
-        ExportBatch batch = selected(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
-        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(
-                        "/api/v1/egress/jobs/practitioner/" + tenant + "/" + batchId + "-r1/cancel"))
-                .willReturn(WireMock.jsonResponse("{\"status\":\"cancellation_requested\"}", 202)));
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        stubCancelAccepted(tenant, batchId + "-r1");
         stubExportAccepted(tenant, batchId + "-r2");
 
-        job.run(new RequestEgressJobRequest(batch.id(), 2));
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
 
         WireMockUpstreams.verify(
                 1,
@@ -269,9 +281,9 @@ class RequestEgressJobIT {
                         .withRequestBody(WireMock.equalToJson(
                                 expectedBody(
                                         tenant,
-                                        batchId,
                                         batchId + "-r2",
-                                        "from/" + tenant + "/" + tenant + "_" + batchId + "_20261001.csv"),
+                                        "from/" + tenant + "/" + tenant + "_" + batchId + "_20261001.csv",
+                                        reusing(batchId + "-r1")),
                                 true,
                                 false)));
         ExportBatch after = batches.find(batch.id()).orElseThrow();
@@ -279,10 +291,134 @@ class RequestEgressJobIT {
         Assertions.assertEquals(batchId + "-r2", after.egress().correlationId());
         Assertions.assertEquals(
                 JobIds.deadline(batchId, 2, 1).toString(), after.egress().deadlineJobId());
-        List<AuditEventType> types = audit.findForBatch(batch.id(), 10).stream()
-                .map(AuditEvent::type)
-                .toList();
+        Assertions.assertNull(after.selection().reEvaluated(), "the list was reused");
+        List<AuditEventType> types = auditTypes(batch);
         Assertions.assertTrue(types.contains(AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCELLED), types.toString());
+        AuditEvent requested = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_EGRESS_REQUESTED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals(batchId + "-r1", requested.detail().get("reuseSelectionFrom"));
+    }
+
+    @Test
+    void aReuseEgressCannotServeIsSentAgainWithTheFilter() {
+        String tenant = "req-reuse-gone";
+        String batchId = tenant + "-candor-2026-10-001";
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        stubCancelAccepted(tenant, batchId + "-r1");
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
+                .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
+                .withRequestBody(
+                        WireMock.matchingJsonPath("$.selection.reuseSelectionFrom", WireMock.equalTo(batchId + "-r1")))
+                .willReturn(WireMock.jsonResponse(
+                        "{\"error\":\"INVALID_REQUEST\",\"message\":\"selection.reuse_selection_from names a "
+                                + "selection whose list has expired\",\"details\":null,\"retryable\":false}",
+                        400)));
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
+                .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
+                .withRequestBody(WireMock.matchingJsonPath("$.selection.filterId", WireMock.equalTo(FILTER_ID)))
+                .willReturn(WireMock.jsonResponse(
+                        String.format(ACCEPTED, tenant, batchId + "-r2", tenant, batchId + "-r2"), 202)));
+
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
+
+        WireMockUpstreams.verify(2, WireMock.postRequestedFor(WireMock.urlEqualTo(EXPORT)));
+        WireMockUpstreams.verify(
+                1,
+                WireMock.postRequestedFor(WireMock.urlEqualTo(EXPORT))
+                        .withRequestBody(WireMock.equalToJson(
+                                expectedBody(
+                                        tenant,
+                                        batchId + "-r2",
+                                        "from/" + tenant + "/" + tenant + "_" + batchId + "_20261001.csv",
+                                        BY_FILTER),
+                                true,
+                                false)));
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
+        Assertions.assertEquals(Boolean.TRUE, after.selection().reEvaluated());
+    }
+
+    @Test
+    void aRequestFormErrorOnAReuseFailsTheBatchInsteadOfEvaluatingAgain() {
+        String tenant = "req-reuse-form";
+        String batchId = tenant + "-candor-2026-10-001";
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        stubCancelAccepted(tenant, batchId + "-r1");
+        stubExportRefused(
+                tenant, 400, "INVALID_REQUEST", "selection.reuse_selection_from must be 255 characters or less");
+
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
+
+        WireMockUpstreams.verify(1, WireMock.postRequestedFor(WireMock.urlEqualTo(EXPORT)));
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.FAILED, after.state());
+        Assertions.assertEquals(ExportBatch.FailedStep.EGRESS, after.failedStep());
+        Assertions.assertTrue(after.lastError().startsWith("400 INVALID_REQUEST: "), after.lastError());
+    }
+
+    @Test
+    void aDisabledSelectionSourceFailsTheBatchAtOnce() {
+        String tenant = "req-disabled";
+        ExportBatch batch = scheduled(tenant, 1, null);
+        stubTemplate(tenant);
+        stubExportRefused(
+                tenant, 403, "SELECTION_SOURCE_DISABLED", "selection by saved filter is disabled in this environment");
+
+        job.run(new RequestEgressJobRequest(batch.id(), 1, 0));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.FAILED, after.state());
+        Assertions.assertEquals(ExportBatch.FailedStep.EGRESS, after.failedStep());
+        Assertions.assertTrue(after.lastError().startsWith("403 SELECTION_SOURCE_DISABLED"), after.lastError());
+        AuditEvent failed = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_BATCH_FAILED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals("EGRESS_REFUSED", failed.detail().get("cause"));
+    }
+
+    @Test
+    void aQuotaRefusalSchedulesANewRequestAfterRetryAfter() {
+        String tenant = "req-quota";
+        ExportBatch batch = scheduled(tenant, 1, null);
+        stubTemplate(tenant);
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
+                .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
+                .willReturn(WireMock.jsonResponse(
+                                "{\"error\":\"SELECTION_QUOTA_EXCEEDED\",\"message\":\"busy\",\"details\":null,"
+                                        + "\"retryable\":true}",
+                                429)
+                        .withHeader("Retry-After", "300")));
+        Instant before = Instant.now();
+
+        job.run(new RequestEgressJobRequest(batch.id(), 1, 0));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.SCHEDULED, after.state(), "waiting is not a failure");
+        org.jobrunr.jobs.Job wait = storage.getJobById(JobIds.quotaWait(batch.id(), 1, 1));
+        Assertions.assertEquals(StateName.SCHEDULED, wait.getState());
+        Instant scheduledAt = ((ScheduledState) wait.getJobState()).getScheduledAt();
+        Assertions.assertTrue(
+                Duration.between(before.plusSeconds(300), scheduledAt).abs().compareTo(Duration.ofMinutes(1)) < 0,
+                "asked again after Retry-After, was " + scheduledAt);
+    }
+
+    @Test
+    void aQuotaRefusalAfterTheLastWaitIsLeftToJobRunr() {
+        String tenant = "req-quota-out";
+        ExportBatch batch = scheduled(tenant, 1, null);
+        stubTemplate(tenant);
+        stubExportRefused(tenant, 429, "SELECTION_QUOTA_EXCEEDED", "busy");
+
+        WebApplicationException failure = Assertions.assertThrows(
+                WebApplicationException.class,
+                () -> job.run(new RequestEgressJobRequest(batch.id(), 1, RequestEgressJob.MAX_QUOTA_WAITS)));
+
+        Assertions.assertEquals(429, failure.getResponse().getStatus());
+        Assertions.assertEquals(
+                BatchState.SCHEDULED, batches.find(batch.id()).orElseThrow().state());
     }
 
     @Test
@@ -290,7 +426,7 @@ class RequestEgressJobIT {
         String tenant = "req-done";
         String batchId = tenant + "-candor-2026-10-001";
         EgressDetails prior = pinned(tenant, batchId, batchId + "-r1");
-        ExportBatch batch = selected(tenant, 2, prior);
+        ExportBatch batch = scheduled(tenant, 2, prior);
         WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(
                         "/api/v1/egress/jobs/practitioner/" + tenant + "/" + batchId + "-r1/cancel"))
                 .willReturn(WireMock.jsonResponse("{\"error\":\"terminal\"}", 409)));
@@ -302,7 +438,7 @@ class RequestEgressJobIT {
                         Map.of("complete", "true", "correlationId", batchId + "-r1"),
                         "md5-" + "x")));
 
-        job.run(new RequestEgressJobRequest(batch.id(), 2));
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
 
         WireMockUpstreams.verify(0, WireMock.postRequestedFor(WireMock.urlEqualTo(EXPORT)));
         ExportBatch after = batches.find(batch.id()).orElseThrow();
@@ -313,9 +449,7 @@ class RequestEgressJobIT {
         Assertions.assertEquals(
                 StateName.ENQUEUED,
                 storage.getJobById(JobIds.of(FinishJob.NAME, batchId, 2)).getState());
-        List<AuditEventType> types = audit.findForBatch(batch.id(), 10).stream()
-                .map(AuditEvent::type)
-                .toList();
+        List<AuditEventType> types = auditTypes(batch);
         Assertions.assertTrue(types.contains(AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCEL_REJECTED), types.toString());
         Assertions.assertTrue(types.contains(AuditEventType.EXPORT_EGRESS_COMPLETED), types.toString());
     }
@@ -324,13 +458,13 @@ class RequestEgressJobIT {
     void aRefusedCancelWithoutAFileRequestsAgain() {
         String tenant = "req-nofile";
         String batchId = tenant + "-candor-2026-10-001";
-        ExportBatch batch = selected(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
         WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(
                         "/api/v1/egress/jobs/practitioner/" + tenant + "/" + batchId + "-r1/cancel"))
                 .willReturn(WireMock.jsonResponse("{\"error\":\"terminal\"}", 409)));
         stubExportAccepted(tenant, batchId + "-r2");
 
-        job.run(new RequestEgressJobRequest(batch.id(), 2));
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
 
         Assertions.assertEquals(
                 BatchState.EGRESS_REQUESTED,
@@ -341,13 +475,13 @@ class RequestEgressJobIT {
     @Test
     void aConflictOnExportIsSuccess() {
         String tenant = "req-conflict";
-        ExportBatch batch = selected(tenant, 1, null);
+        ExportBatch batch = scheduled(tenant, 1, null);
         stubTemplate(tenant);
         WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
                 .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
                 .willReturn(WireMock.jsonResponse("{\"error\":\"job exists\"}", 409)));
 
-        job.run(new RequestEgressJobRequest(batch.id(), 1));
+        job.run(new RequestEgressJobRequest(batch.id(), 1, 0));
 
         ExportBatch after = batches.find(batch.id()).orElseThrow();
         Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
@@ -361,7 +495,7 @@ class RequestEgressJobIT {
     @Test
     void thePinIsWrittenBeforeTheExportCallAndNotRepeatedOnRetry() {
         String tenant = "req-pin";
-        ExportBatch batch = selected(tenant, 1, null);
+        ExportBatch batch = scheduled(tenant, 1, null);
         stubTemplate(tenant);
         WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
                 .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
@@ -377,14 +511,14 @@ class RequestEgressJobIT {
                         String.format(ACCEPTED, tenant, batch.id() + "-r1", tenant, batch.id() + "-r1"), 202)));
 
         WebApplicationException failure = Assertions.assertThrows(
-                WebApplicationException.class, () -> job.run(new RequestEgressJobRequest(batch.id(), 1)));
+                WebApplicationException.class, () -> job.run(new RequestEgressJobRequest(batch.id(), 1, 0)));
         Assertions.assertEquals(503, failure.getResponse().getStatus(), "egress errors propagate so JobRunr retries");
         ExportBatch afterFailure = batches.find(batch.id()).orElseThrow();
-        Assertions.assertEquals(BatchState.NPIS_SELECTED, afterFailure.state());
+        Assertions.assertEquals(BatchState.SCHEDULED, afterFailure.state());
         Assertions.assertEquals("tpl-1", afterFailure.egress().templateId(), "pinned before the call");
         Assertions.assertNull(afterFailure.egress().correlationId(), "no request accepted yet");
 
-        job.run(new RequestEgressJobRequest(batch.id(), 1));
+        job.run(new RequestEgressJobRequest(batch.id(), 1, 0));
 
         WireMockUpstreams.verify(
                 1,

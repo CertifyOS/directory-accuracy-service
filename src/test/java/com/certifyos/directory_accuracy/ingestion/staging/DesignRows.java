@@ -3,8 +3,6 @@ package com.certifyos.directory_accuracy.ingestion.staging;
 import com.certifyos.directory_accuracy.clients.FileIngestionCell;
 import com.certifyos.directory_accuracy.clients.FileIngestionRow;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.ingestion.events.ArrivalEvent;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundNames;
@@ -145,9 +143,8 @@ public final class DesignRows {
 
     /** A candor batch of {@code tenantId} for {@code period}, sequence 1. */
     public static ExportBatch batch(String tenantId, YearMonth period) {
-        SelectionCriteria criteria = new SelectionCriteria(
-                List.of(new SelectionCriteria.Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
-        return ExportBatch.scheduled(tenantId, "candor", period, 1, criteria, Instant.parse("2026-10-01T06:00:12Z"));
+        return ExportBatch.scheduled(
+                tenantId, "candor", period, 1, "flt-direct", Instant.parse("2026-10-01T06:00:12Z"));
     }
 
     /** The upload the design's row came from. */

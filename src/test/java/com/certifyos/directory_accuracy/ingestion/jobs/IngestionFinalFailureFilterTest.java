@@ -67,7 +67,7 @@ class IngestionFinalFailureFilterTest {
         Assertions.assertFalse(IngestionFinalFailureFilter.isIngestionRequest(null), "a recurring job has none");
         Assertions.assertFalse(
                 IngestionFinalFailureFilter.isIngestionRequest(
-                        new com.certifyos.directory_accuracy.export.jobs.SelectJobRequest("b", 1)),
+                        new com.certifyos.directory_accuracy.export.jobs.RequestEgressJobRequest("b", 1, 0)),
                 "the export lane's filter owns its jobs");
     }
 

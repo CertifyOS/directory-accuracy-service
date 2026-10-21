@@ -8,9 +8,6 @@ import com.certifyos.directory_accuracy.audit.AuditRepository;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -37,8 +34,7 @@ import org.junit.jupiter.api.Test;
 @TestProfile(WorkerTestProfile.class)
 public class JobRunrGateIT {
 
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
 
     @Inject
     JobRequestScheduler scheduler;
@@ -103,18 +99,18 @@ public class JobRunrGateIT {
     @Test
     void exhaustedRetriesMarkTheBatchFailedWithItsAuditEvent() {
         ExportBatch batch =
-                ExportBatch.scheduled("gate-fail", "candor", YearMonth.of(2026, 10), 1, CRITERIA, Instant.now());
+                ExportBatch.scheduled("gate-fail", "candor", YearMonth.of(2026, 10), 1, FILTER_ID, Instant.now());
         transactions.run(session -> {
             batches.insert(session, batch);
             return null;
         });
 
-        UUID jobId = enqueuer.select(batch.id(), 1);
-        UUID again = enqueuer.select(batch.id(), 1);
+        UUID jobId = enqueuer.requestEgress(batch.id(), 1);
+        UUID again = enqueuer.requestEgress(batch.id(), 1);
         Assertions.assertEquals(jobId, again, "deterministic id, second enqueue is a no-op");
 
-        // The worker profile has no api-layer machine client and CI has no Google credentials, so the
-        // select job's first api-layer call throws (which exception depends on the environment); with
+        // The batch has no schedule, so the egress request job's template pin throws before any call
+        // leaves the service (IllegalStateException "no schedule for ..."); with
         // job-retries=1 in the test profile the job fails, is retried once about 3 s later, fails again
         // and stays FAILED. The filter then moves the batch.
         Awaitility.await()
@@ -125,7 +121,7 @@ public class JobRunrGateIT {
                 .until(() -> batches.find(batch.id()).orElseThrow().state() == BatchState.FAILED);
 
         ExportBatch failed = batches.find(batch.id()).orElseThrow();
-        Assertions.assertEquals(ExportBatch.FailedStep.SELECT, failed.failedStep());
+        Assertions.assertEquals(ExportBatch.FailedStep.EGRESS, failed.failedStep());
         Assertions.assertTrue(failed.lastError().contains("Exception"), failed.lastError());
         Assertions.assertEquals(2L, failed.version());
 
@@ -134,7 +130,7 @@ public class JobRunrGateIT {
                 .filter(found -> found.type() == AuditEventType.EXPORT_BATCH_FAILED)
                 .findFirst()
                 .orElseThrow();
-        Assertions.assertEquals("SELECT", event.detail().get("failedStep"));
+        Assertions.assertEquals("EGRESS", event.detail().get("failedStep"));
         Assertions.assertEquals("JOB_RETRIES_EXHAUSTED", event.detail().get("cause"));
         Assertions.assertEquals(2, event.detail().get("jobAttempts"));
         Assertions.assertEquals(jobId.toString(), event.jobId());
@@ -143,7 +139,7 @@ public class JobRunrGateIT {
     @Test
     void jobOnARowInAnotherStateExitsAsANoOp() {
         ExportBatch batch =
-                ExportBatch.scheduled("gate-noop", "candor", YearMonth.of(2026, 10), 1, CRITERIA, Instant.now());
+                ExportBatch.scheduled("gate-noop", "candor", YearMonth.of(2026, 10), 1, FILTER_ID, Instant.now());
         transactions.run(session -> {
             batches.insert(session, batch);
             return null;

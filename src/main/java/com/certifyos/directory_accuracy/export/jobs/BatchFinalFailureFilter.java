@@ -24,7 +24,7 @@ import org.jobrunr.jobs.states.StateName;
 /**
  * The first safety net JobRunr cannot provide (design decision D13). When a batch job has used up
  * its retries, JobRunr marks the job failed in its own collection and stops; the batch row would
- * still say {@code SCHEDULED} or {@code NPIS_SELECTED} and nobody would know. This filter runs at
+ * still say {@code SCHEDULED} or {@code EGRESS_COMPLETED} and nobody would know. This filter runs at
  * that moment, moves the batch to {@code FAILED} with the step name and the exception, and writes
  * {@code EXPORT_BATCH_FAILED} in the same transaction. The metric and alert hooks arrive with the
  * observability subtask.
@@ -42,7 +42,6 @@ public class BatchFinalFailureFilter implements ApplyStateFilter {
     private static final Logger LOG = Logger.getLogger(BatchFinalFailureFilter.class);
 
     private static final Map<String, ExportBatch.FailedStep> STEP_BY_JOB_CLASS = Map.of(
-            SelectJob.class.getName(), ExportBatch.FailedStep.SELECT,
             RequestEgressJob.class.getName(), ExportBatch.FailedStep.EGRESS,
             DeadlineCheckJob.class.getName(), ExportBatch.FailedStep.EGRESS,
             FinishJob.class.getName(), ExportBatch.FailedStep.EGRESS);

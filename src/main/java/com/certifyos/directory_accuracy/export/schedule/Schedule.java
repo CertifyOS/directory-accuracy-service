@@ -4,11 +4,10 @@ import com.certifyos.directory_accuracy.persistence.Documents;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.List;
 import org.bson.Document;
 
 /**
- * One row per tenant and vendor: definition (cadence, timezone, selection, template), enablement,
+ * One row per tenant and vendor: definition (cadence, timezone, saved filter id, template), enablement,
  * and runtime state ({@code nextDueAt}, last run). Written only through this service. {@code version}
  * increments on every write and every update is compare-and-set on it.
  *
@@ -18,7 +17,7 @@ import org.bson.Document;
  * @param enabled whether the tick considers this schedule
  * @param cadence when it is due
  * @param timezone the IANA zone the cadence is evaluated in
- * @param selection the practitioner criteria copied onto each batch
+ * @param filterId the api-layer saved filter egress resolves; stored as given, copied onto each batch
  * @param egressTemplateId the tenant's vendor template in egress
  * @param nextDueAt the next due instant, UTC
  * @param lastBatchId the last batch created, or null
@@ -38,7 +37,7 @@ public record Schedule(
         boolean enabled,
         Cadence cadence,
         ZoneId timezone,
-        SelectionCriteria selection,
+        String filterId,
         String egressTemplateId,
         Instant nextDueAt,
         String lastBatchId,
@@ -58,7 +57,7 @@ public record Schedule(
      * @param vendor the vendor code
      * @param cadence when it is due
      * @param timezone the zone
-     * @param selection the criteria
+     * @param filterId the saved filter id
      * @param egressTemplateId the egress template
      * @param nextDueAt the first due instant
      * @param createdBy the operator
@@ -70,7 +69,7 @@ public record Schedule(
             String vendor,
             Cadence cadence,
             ZoneId timezone,
-            SelectionCriteria selection,
+            String filterId,
             String egressTemplateId,
             Instant nextDueAt,
             String createdBy,
@@ -82,7 +81,7 @@ public record Schedule(
                 true,
                 cadence,
                 timezone,
-                selection,
+                filterId,
                 egressTemplateId,
                 nextDueAt,
                 null,
@@ -104,7 +103,7 @@ public record Schedule(
                 .append("enabled", enabled)
                 .append("cadence", cadence.toDocument())
                 .append("timezone", timezone.getId())
-                .append("selection", selection.toDocuments())
+                .append("filterId", filterId)
                 .append("egressTemplateId", egressTemplateId)
                 .append("nextDueAt", nextDueAt)
                 .append("version", version)
@@ -126,7 +125,6 @@ public record Schedule(
      * @return the schedule
      */
     public static Schedule fromDocument(Document doc) {
-        List<Document> selection = doc.getList("selection", Document.class);
         return new Schedule(
                 doc.getString("_id"),
                 doc.getString("tenantId"),
@@ -134,7 +132,7 @@ public record Schedule(
                 doc.getBoolean("enabled", false),
                 Cadence.fromDocument(doc.get("cadence", Document.class)),
                 ZoneId.of(doc.getString("timezone")),
-                SelectionCriteria.fromDocuments(selection),
+                doc.getString("filterId"),
                 doc.getString("egressTemplateId"),
                 Documents.instant(doc, "nextDueAt"),
                 doc.getString("lastBatchId"),

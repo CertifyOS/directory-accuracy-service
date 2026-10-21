@@ -1,10 +1,7 @@
 package com.certifyos.directory_accuracy.export.schedule;
 
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.List;
 import org.bson.Document;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -17,7 +14,7 @@ class ScheduleTest {
                 "candor",
                 Cadence.monthly(1),
                 ZoneId.of("America/New_York"),
-                new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct")))),
+                "flt-direct",
                 "c9a418b5-348e-44e6-95f0-04c45f527367",
                 Instant.parse("2026-11-01T05:00:00Z"),
                 "user:ops-1",

@@ -6,7 +6,6 @@ import com.certifyos.directory_accuracy.audit.AuditRepository;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
 import com.certifyos.directory_accuracy.export.jobs.RequestEgressJob;
-import com.certifyos.directory_accuracy.export.jobs.SelectJob;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
 import com.certifyos.directory_accuracy.http.ProblemException;
@@ -112,7 +111,8 @@ public class BatchOperations {
     }
 
     /**
-     * Retries a failed batch: attempt + 1, back to the state its failed step names, that step's job.
+     * Retries a failed batch: attempt + 1, back to {@code SCHEDULED}, the egress request job. That job
+     * cancels the prior attempt first and asks egress to reuse its frozen list.
      *
      * @param batch the batch, from {@link #require}
      * @param reason mandatory
@@ -127,10 +127,7 @@ public class BatchOperations {
                     "batch " + batch.id() + " is " + batch.state() + "; only FAILED can be retried");
         }
         int attempt = batch.attempt() + 1;
-        BatchState target =
-                batch.failedStep() == ExportBatch.FailedStep.SELECT ? BatchState.SCHEDULED : BatchState.NPIS_SELECTED;
-        String job = target == BatchState.SCHEDULED ? SelectJob.NAME : RequestEgressJob.NAME;
-        UUID jobId = JobIds.of(job, batch.id(), attempt);
+        UUID jobId = JobIds.of(RequestEgressJob.NAME, batch.id(), attempt);
         Instant now = clock.instant();
         Bson updates = Updates.combine(
                 Updates.set("attempt", attempt), Updates.unset("failedStep"), Updates.unset("lastError"));
@@ -145,7 +142,7 @@ public class BatchOperations {
                 .detail("reason", why)
                 .build();
         boolean moved = transactions.run(session -> {
-            boolean ok = batches.transition(session, batch.id(), BatchState.FAILED, target, now, updates);
+            boolean ok = batches.transition(session, batch.id(), BatchState.FAILED, BatchState.SCHEDULED, now, updates);
             if (ok) {
                 audit.write(session, event);
             }
@@ -154,21 +151,18 @@ public class BatchOperations {
         if (!moved) {
             throw ProblemException.conflict("RETRY_NOT_ALLOWED", "batch " + batch.id() + " changed under this request");
         }
-        if (target == BatchState.SCHEDULED) {
-            enqueuer.select(batch.id(), attempt);
-        } else {
-            enqueuer.requestEgress(batch.id(), attempt);
-        }
+        enqueuer.requestEgress(batch.id(), attempt);
         LOG.infof(
-                "%s retried by %s as attempt %d from %s; %s job %s",
-                batch.id(), actor, attempt, batch.failedStep(), job, jobId);
+                "%s retried by %s as attempt %d from %s; egress request job %s",
+                batch.id(), actor, attempt, batch.failedStep(), jobId);
         return new Retried(batches.find(batch.id()).orElseThrow(), jobId);
     }
 
     /**
      * Supersedes a delivered batch: a new batch at {@code seq + 1} in {@code SCHEDULED}, the old
      * one {@code SUPERSEDED}, the schedule's {@code lastBatchId} on the new one, all in one
-     * transaction; then the new batch's select job. The old file stays where the vendor can read it.
+     * transaction; then the new batch's egress request job, which evaluates the saved filter afresh.
+     * The old file stays where the vendor can read it.
      *
      * @param batch the batch, from {@link #require}
      * @param reason mandatory
@@ -191,9 +185,9 @@ public class BatchOperations {
                 batch.vendor(),
                 YearMonth.parse(batch.period()),
                 batch.seq() + 1,
-                schedule.selection(),
+                schedule.filterId(),
                 now);
-        UUID jobId = JobIds.of(SelectJob.NAME, replacement.id(), replacement.attempt());
+        UUID jobId = JobIds.of(RequestEgressJob.NAME, replacement.id(), replacement.attempt());
         AuditEvent superseded = AuditEvent.forBatch(
                         AuditEventType.EXPORT_BATCH_SUPERSEDED,
                         batch.tenantId(),
@@ -256,9 +250,9 @@ public class BatchOperations {
             throw ProblemException.conflict(
                     "VERSION_STALE", "the batch or its schedule changed under this request; read and retry");
         }
-        enqueuer.select(replacement.id(), replacement.attempt());
+        enqueuer.requestEgress(replacement.id(), replacement.attempt());
         metrics.batchCreated(batch.tenantId(), batch.vendor());
-        LOG.infof("%s superseded by %s (%s); select job %s", batch.id(), replacement.id(), actor, jobId);
+        LOG.infof("%s superseded by %s (%s); egress request job %s", batch.id(), replacement.id(), actor, jobId);
         return new Superseded(batches.find(replacement.id()).orElseThrow(), jobId);
     }
 

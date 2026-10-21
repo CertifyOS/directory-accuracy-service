@@ -4,12 +4,8 @@ import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import java.time.Instant;
 import java.time.YearMonth;
-import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -19,12 +15,7 @@ import org.mockito.Mockito;
 class BatchJobSupportTest {
 
     static final ExportBatch SCHEDULED = ExportBatch.scheduled(
-            "org-xyz",
-            "candor",
-            YearMonth.of(2026, 10),
-            1,
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct")))),
-            Instant.parse("2026-10-01T06:00:12Z"));
+            "org-xyz", "candor", YearMonth.of(2026, 10), 1, "flt-direct", Instant.parse("2026-10-01T06:00:12Z"));
 
     private static DirectoryAccuracyConfig config(boolean enabled) {
         DirectoryAccuracyConfig cfg = Mockito.mock(DirectoryAccuracyConfig.class);

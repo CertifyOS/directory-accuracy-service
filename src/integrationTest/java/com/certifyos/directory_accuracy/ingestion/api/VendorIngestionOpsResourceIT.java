@@ -11,7 +11,6 @@ import com.certifyos.directory_accuracy.auth.WireMockDal;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.events.PubSubPushMessage;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
@@ -481,14 +480,7 @@ class VendorIngestionOpsResourceIT {
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = OPERATOR)})
     void attachToAnUndeliveredBatchIs409() {
         ExportBatch requested = EgressFixtures.batchIn(
-                transactions,
-                batches,
-                new ExportNpiRepository(collections),
-                TENANT,
-                "undelivered",
-                BatchState.EGRESS_REQUESTED,
-                1,
-                Instant.now());
+                transactions, batches, TENANT, "undelivered", BatchState.EGRESS_REQUESTED, 1, Instant.now());
         UnmatchedUpload row = insert(parsedRow(TENANT, requested.id()));
 
         member().pathParam("uploadId", row.id())
@@ -559,14 +551,7 @@ class VendorIngestionOpsResourceIT {
 
     private ExportBatch deliveredBatch(String tenant, String vendor) {
         ExportBatch egressed = EgressFixtures.batchIn(
-                transactions,
-                batches,
-                new ExportNpiRepository(collections),
-                tenant,
-                vendor,
-                BatchState.EGRESS_COMPLETED,
-                1,
-                InboundFixtures.DELIVERED_AT);
+                transactions, batches, tenant, vendor, BatchState.EGRESS_COMPLETED, 1, InboundFixtures.DELIVERED_AT);
         transactions.run(session -> batches.transition(
                 session,
                 egressed.id(),

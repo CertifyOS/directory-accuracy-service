@@ -4,9 +4,6 @@ import com.certifyos.directory_accuracy.clients.ArchiveStore;
 import com.certifyos.directory_accuracy.clients.FileIngestionClient;
 import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
@@ -16,7 +13,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
-import java.util.List;
 import java.util.Optional;
 import org.bson.Document;
 import org.junit.jupiter.api.Assertions;
@@ -32,13 +28,8 @@ import org.mockito.Mockito;
 class RequestIngestionJobTest {
 
     static final Instant NOW = Instant.parse("2026-10-15T09:13:00Z");
-    static final ExportBatch BATCH = ExportBatch.scheduled(
-            "org-xyz",
-            "candor",
-            YearMonth.of(2026, 10),
-            1,
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct")))),
-            NOW);
+    static final ExportBatch BATCH =
+            ExportBatch.scheduled("org-xyz", "candor", YearMonth.of(2026, 10), 1, "flt-direct", NOW);
     static final String UPLOAD_ID =
             "vendor-sftp|to/org-xyz/org-xyz_" + BATCH.id() + "_CB-2026-10-001_20261015.csv|1760520000123456";
 

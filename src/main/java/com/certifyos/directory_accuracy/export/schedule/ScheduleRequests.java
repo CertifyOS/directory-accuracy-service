@@ -1,17 +1,16 @@
 package com.certifyos.directory_accuracy.export.schedule;
 
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import java.time.DateTimeException;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /** The request bodies of the schedule endpoints, in the design's shapes, and their conversions. */
 public final class ScheduleRequests {
+
+    /** A saved filter id as egress accepts it: letters, digits, {@code _} and {@code -}, at most 255. */
+    private static final Pattern FILTER_ID = Pattern.compile("^[A-Za-z0-9_-]{1,255}$");
 
     private ScheduleRequests() {}
 
@@ -41,72 +40,19 @@ public final class ScheduleRequests {
         }
     }
 
-    /** One clause of {@code selection}: exactly one of {@code eq}, {@code in}, {@code gte}, {@code lte}. */
-    public record ClauseRequest(String eq, List<String> in, String gte, String lte) {
-        Clause toClause(String field) {
-            List<Clause> candidates = new ArrayList<>();
-            if (eq != null) {
-                candidates.add(new Clause(field, Operator.EQ, List.of(eq)));
-            }
-            if (in != null) {
-                candidates.add(new Clause(field, Operator.IN, in));
-            }
-            if (gte != null) {
-                candidates.add(new Clause(field, Operator.GTE, List.of(gte)));
-            }
-            if (lte != null) {
-                candidates.add(new Clause(field, Operator.LTE, List.of(lte)));
-            }
-            if (candidates.size() != 1) {
-                throw ProblemException.badRequest(SelectionSchema.CODE, field + ": exactly one of eq, in, gte, lte");
-            }
-            return candidates.get(0);
-        }
-
-        static ClauseRequest of(Clause clause) {
-            return switch (clause.operator()) {
-                case EQ -> new ClauseRequest(clause.values().get(0), null, null, null);
-                case IN -> new ClauseRequest(null, clause.values(), null, null);
-                case GTE -> new ClauseRequest(null, null, clause.values().get(0), null);
-                case LTE -> new ClauseRequest(null, null, null, clause.values().get(0));
-            };
-        }
-    }
-
     /**
-     * Converts the request's selection object to criteria and validates it against the schema.
+     * Checks a saved filter id for form only. Whether the filter exists and is usable is egress's
+     * check on the first export ({@code FILTER_NOT_USABLE}); this service never reads the filter.
      *
-     * @param selection field to clause
-     * @return the criteria
+     * @param filterId the id from the request
+     * @return the id, unchanged
      */
-    public static SelectionCriteria toCriteria(Map<String, ClauseRequest> selection) {
-        if (selection == null || selection.isEmpty()) {
-            throw ProblemException.badRequest(SelectionSchema.CODE, "selection needs at least one clause");
+    public static String toFilterId(String filterId) {
+        if (filterId == null || !FILTER_ID.matcher(filterId).matches()) {
+            throw ProblemException.badRequest(
+                    "FILTER_ID_INVALID", "filterId is required: 1-255 letters, digits, '_' or '-'");
         }
-        List<Clause> clauses = new ArrayList<>();
-        for (Map.Entry<String, ClauseRequest> entry : selection.entrySet()) {
-            if (entry.getValue() == null) {
-                throw ProblemException.badRequest(SelectionSchema.CODE, entry.getKey() + ": clause is required");
-            }
-            clauses.add(entry.getValue().toClause(entry.getKey()));
-        }
-        SelectionCriteria criteria;
-        try {
-            criteria = new SelectionCriteria(clauses);
-        } catch (IllegalArgumentException invalid) {
-            throw ProblemException.badRequest(SelectionSchema.CODE, invalid.getMessage());
-        }
-        SelectionSchema.validate(criteria);
-        return criteria;
-    }
-
-    /** The selection in request shape, for views. */
-    public static Map<String, ClauseRequest> toSelection(SelectionCriteria criteria) {
-        Map<String, ClauseRequest> selection = new java.util.LinkedHashMap<>();
-        for (Clause clause : criteria.clauses()) {
-            selection.put(clause.field(), ClauseRequest.of(clause));
-        }
-        return selection;
+        return filterId;
     }
 
     /** Parses an IANA zone. */
@@ -123,11 +69,7 @@ public final class ScheduleRequests {
 
     /** {@code PUT} body. */
     public record PutRequest(
-            Long version,
-            CadenceRequest cadence,
-            String timezone,
-            Map<String, ClauseRequest> selection,
-            String egressTemplateId) {
+            Long version, CadenceRequest cadence, String timezone, String filterId, String egressTemplateId) {
         Optional<String> templateOverride() {
             return Optional.ofNullable(egressTemplateId).filter(id -> !id.isBlank());
         }
@@ -139,14 +81,8 @@ public final class ScheduleRequests {
     /** {@code enable} body. */
     public record EnableRequest(String reason, Boolean catchUp) {}
 
-    /** {@code preview} body: the selection to test, or empty to test the stored one. */
-    public record PreviewRequest(Map<String, ClauseRequest> selection) {}
-
     /** {@code run-now} answer. */
     public record RunNowResponse(String exportBatchId, String jobId, java.time.Instant nextDueAt) {}
-
-    /** {@code preview} answer. */
-    public record PreviewResponse(long totalCount) {}
 
     /** A schedule as the API shows it. */
     public record ScheduleView(
@@ -155,7 +91,7 @@ public final class ScheduleRequests {
             boolean enabled,
             CadenceRequest cadence,
             String timezone,
-            Map<String, ClauseRequest> selection,
+            String filterId,
             String egressTemplateId,
             java.time.Instant nextDueAt,
             String lastBatchId,
@@ -173,7 +109,7 @@ public final class ScheduleRequests {
                     schedule.enabled(),
                     CadenceRequest.of(schedule.cadence()),
                     schedule.timezone().getId(),
-                    toSelection(schedule.selection()),
+                    schedule.filterId(),
                     schedule.egressTemplateId(),
                     schedule.nextDueAt(),
                     schedule.lastBatchId(),

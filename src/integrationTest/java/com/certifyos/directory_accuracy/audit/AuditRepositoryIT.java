@@ -5,9 +5,6 @@ import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Filters;
@@ -29,8 +26,7 @@ import org.junit.jupiter.api.Test;
 public class AuditRepositoryIT {
 
     static final Instant NOW = Instant.parse("2026-10-01T06:00:12Z");
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
 
     @Inject
     AuditRepository audit;
@@ -45,7 +41,7 @@ public class AuditRepositoryIT {
     Collections collections;
 
     private ExportBatch insertBatch(String tenantId) {
-        ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", YearMonth.of(2026, 10), 1, CRITERIA, NOW);
+        ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", YearMonth.of(2026, 10), 1, FILTER_ID, NOW);
         transactions.run(session -> {
             batches.insert(session, batch);
             audit.write(
@@ -69,26 +65,27 @@ public class AuditRepositoryIT {
         ExportBatch batch = insertBatch("aud-commit");
         transactions.run(session -> {
             boolean moved = batches.transition(
-                    session, batch.id(), BatchState.SCHEDULED, BatchState.NPIS_SELECTED, NOW.plusSeconds(30), null);
+                    session, batch.id(), BatchState.SCHEDULED, BatchState.EGRESS_REQUESTED, NOW.plusSeconds(30), null);
             Assertions.assertTrue(moved);
             audit.write(
                     session,
-                    AuditEvent.forBatch(
-                                    AuditEventType.EXPORT_SELECTION_COMPLETED, "aud-commit", "candor", batch.id(), 1)
+                    AuditEvent.forBatch(AuditEventType.EXPORT_EGRESS_REQUESTED, "aud-commit", "candor", batch.id(), 1)
                             .occurredAt(NOW.plusSeconds(30))
-                            .detail("practitionersSelected", 1240)
-                            .detail("criteria", "c")
-                            .detail("pages", 13)
-                            .detail("durationMs", 1)
+                            .detail("egressCorrelationId", batch.id() + "-r1")
+                            .detail("templateId", "tpl-1")
+                            .detail("filterId", FILTER_ID)
+                            .detail("reuseSelectionFrom", null)
+                            .detail("egressResponse", "202")
+                            .detail("deadlineAt", NOW.plusSeconds(21600))
                             .build());
             return null;
         });
 
         List<AuditEvent> trail = audit.findForBatch(batch.id(), 10);
         Assertions.assertEquals(
-                List.of(AuditEventType.EXPORT_BATCH_SCHEDULED, AuditEventType.EXPORT_SELECTION_COMPLETED),
+                List.of(AuditEventType.EXPORT_BATCH_SCHEDULED, AuditEventType.EXPORT_EGRESS_REQUESTED),
                 trail.stream().map(AuditEvent::type).toList());
-        Assertions.assertEquals(1240, trail.get(1).detail().get("practitionersSelected"));
+        Assertions.assertEquals(FILTER_ID, trail.get(1).detail().get("filterId"));
     }
 
     @Test
@@ -98,13 +95,15 @@ public class AuditRepositoryIT {
                 IllegalStateException.class,
                 () -> transactions.run(session -> {
                     batches.transition(
-                            session, batch.id(), BatchState.SCHEDULED, BatchState.EMPTY, NOW.plusSeconds(30), null);
+                            session, batch.id(), BatchState.SCHEDULED, BatchState.FAILED, NOW.plusSeconds(30), null);
                     audit.write(
                             session,
                             AuditEvent.forBatch(
-                                            AuditEventType.EXPORT_BATCH_EMPTY, "aud-rollback", "candor", batch.id(), 1)
+                                            AuditEventType.EXPORT_BATCH_FAILED, "aud-rollback", "candor", batch.id(), 1)
                                     .occurredAt(NOW.plusSeconds(30))
-                                    .detail("criteria", "c")
+                                    .detail("failedStep", "EGRESS")
+                                    .detail("cause", "EGRESS_REFUSED")
+                                    .detail("lastError", "403 SELECTION_SOURCE_DISABLED: off")
                                     .build());
                     throw new IllegalStateException("crash before commit");
                 }));

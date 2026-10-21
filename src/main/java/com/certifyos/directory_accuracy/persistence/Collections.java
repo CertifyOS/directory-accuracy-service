@@ -8,7 +8,7 @@ import java.util.List;
 import org.bson.Document;
 
 /**
- * The eight collections this service owns in database {@code directory_accuracy}. JobRunr owns five more
+ * The seven collections this service owns in database {@code directory_accuracy}. JobRunr owns five more
  * ({@code jobrunr_*}) in the same database and our code never names them.
  */
 @ApplicationScoped
@@ -35,11 +35,6 @@ public class Collections {
     /** One document per tenant, vendor, period and sequence. */
     public MongoCollection<Document> batches() {
         return database().getCollection("vendor_export_batches");
-    }
-
-    /** One document per NPI within a batch; written once. */
-    public MongoCollection<Document> npis() {
-        return database().getCollection("vendor_export_npis");
     }
 
     /** Append-only audit trail; one document per lifecycle event. */
@@ -76,7 +71,6 @@ public class Collections {
         return List.of(
                 schedules(),
                 batches(),
-                npis(),
                 events(),
                 fieldRecommendations(),
                 unmatchedUploads(),

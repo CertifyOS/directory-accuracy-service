@@ -2,9 +2,6 @@ package com.certifyos.directory_accuracy.export.batch;
 
 import com.certifyos.directory_accuracy.ApiTestProfile;
 import com.certifyos.directory_accuracy.MongoResource;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.AlreadyExistsException;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Updates;
@@ -25,8 +22,7 @@ import org.junit.jupiter.api.Test;
 public class ExportBatchRepositoryIT {
 
     static final Instant NOW = Instant.parse("2026-10-01T06:00:12Z");
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
 
     @Inject
     ExportBatchRepository batches;
@@ -35,7 +31,7 @@ public class ExportBatchRepositoryIT {
     Transactions transactions;
 
     private ExportBatch insert(String tenantId, int seq) {
-        ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", YearMonth.of(2026, 10), seq, CRITERIA, NOW);
+        ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", YearMonth.of(2026, 10), seq, FILTER_ID, NOW);
         transactions.run(session -> {
             batches.insert(session, batch);
             return null;
@@ -66,18 +62,18 @@ public class ExportBatchRepositoryIT {
                 session,
                 batch.id(),
                 BatchState.SCHEDULED,
-                BatchState.NPIS_SELECTED,
+                BatchState.EGRESS_REQUESTED,
                 NOW.plusSeconds(30),
-                Updates.set("selection.practitionersSelected", 1240)));
+                Updates.set("egress.correlationId", batch.id() + "-r1")));
         boolean stale = transactions.run(session -> batches.transition(
-                session, batch.id(), BatchState.SCHEDULED, BatchState.EMPTY, NOW.plusSeconds(31), null));
+                session, batch.id(), BatchState.SCHEDULED, BatchState.FAILED, NOW.plusSeconds(31), null));
 
         Assertions.assertTrue(moved);
         Assertions.assertFalse(stale, "a job that read SCHEDULED must find the row gone and exit as a no-op");
         ExportBatch after = batches.find(batch.id()).orElseThrow();
-        Assertions.assertEquals(BatchState.NPIS_SELECTED, after.state());
+        Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
         Assertions.assertEquals(2L, after.version());
-        Assertions.assertEquals(1240, after.selection().practitionersSelected());
+        Assertions.assertEquals(batch.id() + "-r1", after.egress().correlationId());
         Assertions.assertEquals(NOW.plusSeconds(30), after.updatedAt());
     }
 
@@ -96,14 +92,18 @@ public class ExportBatchRepositoryIT {
     void updateInStateKeepsTheStateAndBumpsTheVersion() {
         ExportBatch batch = insert("bat-progress", 1);
         boolean saved = transactions.run(session -> batches.updateInState(
-                session, batch.id(), BatchState.SCHEDULED, NOW.plusSeconds(5), Updates.set("selection.page", 3)));
+                session, batch.id(), BatchState.SCHEDULED, NOW.plusSeconds(5), Updates.set("selection.distinct", 3L)));
         boolean wrongState = transactions.run(session -> batches.updateInState(
-                session, batch.id(), BatchState.NPIS_SELECTED, NOW.plusSeconds(6), Updates.set("selection.page", 9)));
+                session,
+                batch.id(),
+                BatchState.EGRESS_REQUESTED,
+                NOW.plusSeconds(6),
+                Updates.set("selection.distinct", 9L)));
 
         Assertions.assertTrue(saved);
         Assertions.assertFalse(wrongState);
         ExportBatch after = batches.find(batch.id()).orElseThrow();
-        Assertions.assertEquals(3, after.selection().page());
+        Assertions.assertEquals(3L, after.selection().distinct());
         Assertions.assertEquals(BatchState.SCHEDULED, after.state());
         Assertions.assertEquals(2L, after.version());
     }
@@ -113,11 +113,9 @@ public class ExportBatchRepositoryIT {
         ExportBatch batch = insert("bat-corr", 1);
         String correlation = batch.id() + "-r1";
         transactions.run(session -> batches.transition(
-                session, batch.id(), BatchState.SCHEDULED, BatchState.NPIS_SELECTED, NOW.minusSeconds(7200), null));
-        transactions.run(session -> batches.transition(
                 session,
                 batch.id(),
-                BatchState.NPIS_SELECTED,
+                BatchState.SCHEDULED,
                 BatchState.EGRESS_REQUESTED,
                 NOW.minusSeconds(3600),
                 Updates.set("egress.correlationId", correlation)));

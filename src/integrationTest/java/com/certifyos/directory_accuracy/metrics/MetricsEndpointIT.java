@@ -26,14 +26,7 @@ class MetricsEndpointIT {
         String body =
                 RestAssured.get("/q/metrics").then().statusCode(200).extract().asString();
         for (String state : List.of(
-                "SCHEDULED",
-                "NPIS_SELECTED",
-                "EGRESS_REQUESTED",
-                "EGRESS_COMPLETED",
-                "DELIVERED",
-                "EMPTY",
-                "FAILED",
-                "SUPERSEDED")) {
+                "SCHEDULED", "EGRESS_REQUESTED", "EGRESS_COMPLETED", "DELIVERED", "EMPTY", "FAILED", "SUPERSEDED")) {
             Assertions.assertTrue(
                     body.contains("vendor_export_batches_by_state{state=\"" + state + "\""), "missing state " + state);
         }

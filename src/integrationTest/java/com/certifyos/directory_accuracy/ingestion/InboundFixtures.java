@@ -3,7 +3,6 @@ package com.certifyos.directory_accuracy.ingestion;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.ingestion.events.ArrivalEvent;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
@@ -59,14 +58,8 @@ public final class InboundFixtures {
     /** Inserts a batch and walks it to {@code DELIVERED}, with no inbound entry yet. */
     public static ExportBatch deliveredBatch(
             Transactions transactions, ExportBatchRepository batches, Collections collections, String tenant) {
-        ExportBatch egressed = EgressFixtures.batchIn(
-                transactions,
-                batches,
-                new ExportNpiRepository(collections),
-                tenant,
-                BatchState.EGRESS_COMPLETED,
-                1,
-                DELIVERED_AT);
+        ExportBatch egressed =
+                EgressFixtures.batchIn(transactions, batches, tenant, BatchState.EGRESS_COMPLETED, 1, DELIVERED_AT);
         transactions.run(session -> {
             batches.transition(
                     session,

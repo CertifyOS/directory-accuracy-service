@@ -71,8 +71,8 @@ class DirectoryAccuracyMetricsTest {
         metrics.completion("EVENT");
         metrics.eventRejected("UNKNOWN_CORRELATION");
         metrics.reconcileMismatch("org-a");
-        metrics.jobRetry("SelectJob");
-        metrics.jobFinalFailure("SelectJob");
+        metrics.jobRetry("RequestEgressJob");
+        metrics.jobFinalFailure("RequestEgressJob");
         metrics.registerGauge(DirectoryAccuracyMetrics.BATCHES_BY_STATE, Tags.of("state", "SCHEDULED"), () -> 2);
         metrics.registerGauge(DirectoryAccuracyMetrics.SCHEDULES_BY_STATE, Tags.of("state", "ENABLED"), () -> 1);
         Set<String> registered = names();

@@ -8,8 +8,6 @@ import com.certifyos.directory_accuracy.export.api.Items;
 import com.certifyos.directory_accuracy.export.batch.BatchLifecycle;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.DisableRequest;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.EnableRequest;
-import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.PreviewRequest;
-import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.PreviewResponse;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.PutRequest;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.RunNowResponse;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRequests.ScheduleView;
@@ -44,7 +42,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @SecurityRequirement(name = "platform-token")
 @APIResponse(
         responseCode = "400",
-        description = "Invalid request (SELECTION_INVALID, CADENCE_INVALID, TIMEZONE_INVALID, INVALID_REQUEST, "
+        description = "Invalid request (FILTER_ID_INVALID, CADENCE_INVALID, TIMEZONE_INVALID, INVALID_REQUEST, "
                 + "TEMPLATE_NOT_FOUND, TEMPLATE_WRONG_ENTITY, REASON_REQUIRED)",
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 @APIResponse(responseCode = "401", description = "No or invalid platform token")
@@ -218,7 +216,7 @@ public class ScheduleResource {
      *
      * @param tenantId the tenant
      * @param vendor the vendor
-     * @return 201 with the batch id, its select job id and the schedule's new due instant
+     * @return 201 with the batch id, its egress request job id and the schedule's new due instant
      */
     @POST
     @Path("/{tenantId}/{vendor}/run-now")
@@ -226,7 +224,7 @@ public class ScheduleResource {
     @Operation(
             summary = "Run an export schedule now",
             description = "Creates the current period's batch as the tick would, advances nextDueAt and enqueues the "
-                    + "select job. 409 BATCH_EXISTS when the period already has its batch, SCHEDULE_DISABLED when "
+                    + "egress request job. 409 BATCH_EXISTS when the period already has its batch, SCHEDULE_DISABLED when "
                     + "the schedule is disabled.")
     @APIResponse(
             responseCode = "201",
@@ -239,26 +237,6 @@ public class ScheduleResource {
                 .entity(new RunNowResponse(
                         scheduled.batch().id(), scheduled.jobId().toString(), scheduled.nextDueAt()))
                 .build();
-    }
-
-    /**
-     * Counts what a selection matches today.
-     *
-     * @param tenantId the tenant
-     * @param vendor the vendor
-     * @param request the selection to test, or empty for the stored one
-     * @return the count
-     */
-    @POST
-    @Path("/{tenantId}/{vendor}/preview")
-    @RequiresPermission(Permission.READ)
-    @Operation(
-            summary = "Preview a selection",
-            description = "Runs the selection against api-layer with page size 1 and returns totalCount.")
-    public PreviewResponse preview(
-            @PathParam("tenantId") String tenantId, @PathParam("vendor") String vendor, PreviewRequest request) {
-        sameTenant(tenantId);
-        return new PreviewResponse(service.preview(tenantId, vendor, request == null ? null : request.selection()));
     }
 
     private void sameTenant(String tenantId) {

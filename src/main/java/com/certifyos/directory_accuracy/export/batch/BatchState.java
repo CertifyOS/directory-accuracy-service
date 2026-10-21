@@ -4,13 +4,12 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * The export batch lifecycle. Main path {@code SCHEDULED → NPIS_SELECTED → EGRESS_REQUESTED →
- * EGRESS_COMPLETED → DELIVERED}; side states {@code EMPTY}, {@code FAILED}, {@code SUPERSEDED}.
- * Every transition is a compare-and-set on the stored state; this enum says which edges exist.
+ * The export batch lifecycle. Main path {@code SCHEDULED → EGRESS_REQUESTED → EGRESS_COMPLETED →
+ * DELIVERED}; side states {@code EMPTY}, {@code FAILED}, {@code SUPERSEDED}. Every transition is a
+ * compare-and-set on the stored state; this enum says which edges exist.
  */
 public enum BatchState {
     SCHEDULED,
-    NPIS_SELECTED,
     EGRESS_REQUESTED,
     EGRESS_COMPLETED,
     DELIVERED,
@@ -22,12 +21,12 @@ public enum BatchState {
      * Whether a transition from this state to {@code next} is allowed.
      *
      * <ul>
-     *   <li>{@code SCHEDULED} → {@code NPIS_SELECTED}, {@code EMPTY}, {@code FAILED}
-     *   <li>{@code NPIS_SELECTED} → {@code EGRESS_REQUESTED}, {@code FAILED}
-     *   <li>{@code EGRESS_REQUESTED} → {@code EGRESS_COMPLETED}, {@code FAILED}
+     *   <li>{@code SCHEDULED} → {@code EGRESS_REQUESTED}, {@code FAILED}
+     *   <li>{@code EGRESS_REQUESTED} → {@code EGRESS_COMPLETED}, {@code EMPTY} (the saved filter
+     *       matched nobody), {@code FAILED}
      *   <li>{@code EGRESS_COMPLETED} → {@code DELIVERED}, {@code FAILED}
      *   <li>{@code DELIVERED} → {@code SUPERSEDED}
-     *   <li>{@code FAILED} → {@code SCHEDULED} or {@code NPIS_SELECTED} (operator retry puts the batch back where it failed)
+     *   <li>{@code FAILED} → {@code SCHEDULED} (operator retry asks egress again)
      *   <li>{@code EMPTY}, {@code SUPERSEDED}: terminal
      * </ul>
      *
@@ -41,12 +40,11 @@ public enum BatchState {
     /** The states this state may move to. */
     public Set<BatchState> allowedNext() {
         return switch (this) {
-            case SCHEDULED -> EnumSet.of(NPIS_SELECTED, EMPTY, FAILED);
-            case NPIS_SELECTED -> EnumSet.of(EGRESS_REQUESTED, FAILED);
-            case EGRESS_REQUESTED -> EnumSet.of(EGRESS_COMPLETED, FAILED);
+            case SCHEDULED -> EnumSet.of(EGRESS_REQUESTED, FAILED);
+            case EGRESS_REQUESTED -> EnumSet.of(EGRESS_COMPLETED, EMPTY, FAILED);
             case EGRESS_COMPLETED -> EnumSet.of(DELIVERED, FAILED);
             case DELIVERED -> EnumSet.of(SUPERSEDED);
-            case FAILED -> EnumSet.of(SCHEDULED, NPIS_SELECTED);
+            case FAILED -> EnumSet.of(SCHEDULED);
             case EMPTY, SUPERSEDED -> EnumSet.noneOf(BatchState.class);
         };
     }
@@ -58,6 +56,6 @@ public enum BatchState {
 
     /** The states the hourly reconciler watches: a row sitting here without a job is stuck. */
     public static Set<BatchState> reconcilable() {
-        return EnumSet.of(SCHEDULED, NPIS_SELECTED, EGRESS_COMPLETED);
+        return EnumSet.of(SCHEDULED, EGRESS_COMPLETED);
     }
 }
