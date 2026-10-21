@@ -1,4 +1,4 @@
-# vendor-exchange-service
+# directory-accuracy-service
 #
 # Developer verbs, then the internal deploy flow (terraform/internal). Each deploy step is one short
 # command so a runner that kills long processes never leaves an apply half done. Production deploys
@@ -6,9 +6,9 @@
 
 PROJECT  := certifyos-development
 REGION   := us-central1
-REPO     := $(REGION)-docker.pkg.dev/$(PROJECT)/vendor-exchange
+REPO     := $(REGION)-docker.pkg.dev/$(PROJECT)/directory-accuracy
 TAG      := $(shell git rev-parse --short=12 HEAD)
-IMAGE    := $(REPO)/vendor-exchange-service:$(TAG)
+IMAGE    := $(REPO)/directory-accuracy-service:$(TAG)
 ROLE     ?= api
 TF_DIR   := terraform/internal
 TF       := terraform -chdir=$(TF_DIR)
@@ -110,23 +110,23 @@ deploy: push-image ## Push, write image.auto.tfvars, apply templates and both gr
 
 .PHONY: rollout-api
 rollout-api: ## Proactive rolling update of the api group to the current api template
-	gcloud compute instance-groups managed rolling-action start-update vendor-exchange-api --region $(REGION) --project $(PROJECT) \
+	gcloud compute instance-groups managed rolling-action start-update directory-accuracy-api --region $(REGION) --project $(PROJECT) \
 	  --version template=$$($(TF) output -raw api_template) --max-surge 3 --max-unavailable 0 --type proactive
-	gcloud compute instance-groups managed wait-until vendor-exchange-api --stable --region $(REGION) --project $(PROJECT) --timeout 600
+	gcloud compute instance-groups managed wait-until directory-accuracy-api --stable --region $(REGION) --project $(PROJECT) --timeout 600
 
 .PHONY: rollout-worker
 rollout-worker: ## Proactive rolling update of the worker group (check jobrunr_jobs has no PROCESSING document first)
-	gcloud compute instance-groups managed rolling-action start-update vendor-exchange-worker --region $(REGION) --project $(PROJECT) \
+	gcloud compute instance-groups managed rolling-action start-update directory-accuracy-worker --region $(REGION) --project $(PROJECT) \
 	  --version template=$$($(TF) output -raw worker_template) --max-surge 3 --max-unavailable 0 --type proactive
-	gcloud compute instance-groups managed wait-until vendor-exchange-worker --stable --region $(REGION) --project $(PROJECT) --timeout 600
+	gcloud compute instance-groups managed wait-until directory-accuracy-worker --stable --region $(REGION) --project $(PROJECT) --timeout 600
 
 rollback-%: ## make rollback-api PREVIOUS_TEMPLATE=<template self link> (or rollback-worker)
-	gcloud compute instance-groups managed rolling-action start-update vendor-exchange-$* --region $(REGION) --project $(PROJECT) \
+	gcloud compute instance-groups managed rolling-action start-update directory-accuracy-$* --region $(REGION) --project $(PROJECT) \
 	  --version template=$(PREVIOUS_TEMPLATE) --max-surge 3 --max-unavailable 0 --type proactive
 
 .PHONY: tunnel-dashboard
 tunnel-dashboard: ## IAP tunnel to the worker's JobRunr dashboard: then open http://localhost:8000
-	$(eval WORKER := $(shell gcloud compute instance-groups managed list-instances vendor-exchange-worker --region $(REGION) --project $(PROJECT) --format='value(instance.basename(),instance.scope(zones).segment(0))' | head -1))
+	$(eval WORKER := $(shell gcloud compute instance-groups managed list-instances directory-accuracy-worker --region $(REGION) --project $(PROJECT) --format='value(instance.basename(),instance.scope(zones).segment(0))' | head -1))
 	gcloud compute start-iap-tunnel $(word 1,$(WORKER)) 8000 --local-host-port=localhost:8000 --zone $(word 2,$(WORKER)) --project $(PROJECT)
 
 .PHONY: smoke

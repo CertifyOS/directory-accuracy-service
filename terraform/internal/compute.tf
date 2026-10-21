@@ -29,13 +29,13 @@ locals {
   templates = {
     api = {
       machine_type    = "e2-small"
-      tag             = "vendor-exchange-api"
+      tag             = "directory-accuracy-api"
       service_account = google_service_account.api.email
       env             = merge({ QUARKUS_PROFILE = "prod,api" }, local.env_common)
     }
     worker = {
       machine_type    = "e2-standard-2"
-      tag             = "vendor-exchange-worker"
+      tag             = "directory-accuracy-worker"
       service_account = google_service_account.worker.email
       env             = merge({ QUARKUS_PROFILE = "prod,worker" }, local.env_common)
     }
@@ -52,7 +52,7 @@ data "google_compute_image" "cos" {
 resource "google_compute_instance_template" "role" {
   for_each = local.templates
 
-  name_prefix  = "vendor-exchange-${each.key}-"
+  name_prefix  = "directory-accuracy-${each.key}-"
   machine_type = each.value.machine_type
   tags         = [each.value.tag]
   labels       = local.labels
@@ -100,7 +100,7 @@ resource "google_compute_instance_template" "role" {
 }
 
 resource "google_compute_health_check" "live" {
-  name                = "vendor-exchange-live"
+  name                = "directory-accuracy-live"
   check_interval_sec  = 10
   timeout_sec         = 5
   healthy_threshold   = 2
@@ -115,9 +115,9 @@ resource "google_compute_health_check" "live" {
 # Regional groups over three zones. A fixed max_surge/max_unavailable on a regional group must be
 # 0 or at least the number of zones, so 3 is the smallest surge that works.
 resource "google_compute_region_instance_group_manager" "api" {
-  name                      = "vendor-exchange-api"
+  name                      = "directory-accuracy-api"
   region                    = local.region
-  base_instance_name        = "vendor-exchange-api"
+  base_instance_name        = "directory-accuracy-api"
   distribution_policy_zones = local.zones
   target_size               = 2
 
@@ -146,9 +146,9 @@ resource "google_compute_region_instance_group_manager" "api" {
 # One worker, OPPORTUNISTIC so a `terraform apply` never replaces it mid job; `make rollout-worker`
 # drives the replacement.
 resource "google_compute_region_instance_group_manager" "worker" {
-  name                      = "vendor-exchange-worker"
+  name                      = "directory-accuracy-worker"
   region                    = local.region
-  base_instance_name        = "vendor-exchange-worker"
+  base_instance_name        = "directory-accuracy-worker"
   distribution_policy_zones = local.zones
   target_size               = 1
 

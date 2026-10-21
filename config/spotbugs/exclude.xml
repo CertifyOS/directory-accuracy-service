@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    SpotBugs exclusions for com.certifyos.vendor_exchange.
+    SpotBugs exclusions for com.certifyos.directory_accuracy.
 
     One policy exclusion, taken from the new-service playbook: the expose-internal-representation
     rules are disabled once here rather than suppressed class by class (api-layer carries 614
@@ -23,7 +23,7 @@
         constructs this bean.
     -->
     <Match>
-        <Class name="com.certifyos.vendor_exchange.ingestion.events.ArrivalHandler"/>
+        <Class name="com.certifyos.directory_accuracy.ingestion.events.ArrivalHandler"/>
         <Bug pattern="CT_CONSTRUCTOR_THROW"/>
     </Match>
 </FindBugsFilter>

@@ -1,5 +1,5 @@
 variable "env" {
-  description = "Environment name, used in resource naming and the hostname (vendor-exchange.<env>.certifyos.com)."
+  description = "Environment name, used in resource naming and the hostname (directory-accuracy.<env>.certifyos.com)."
   type        = string
   default     = "internal"
 }
@@ -108,7 +108,7 @@ variable "permissions_enforce" {
 }
 
 variable "sentry_environment" {
-  description = "Sentry environment tag. Sentry itself turns on only when the vendor-exchange-sentry-dsn secret has a version."
+  description = "Sentry environment tag. Sentry itself turns on only when the directory-accuracy-sentry-dsn secret has a version."
   type        = string
   default     = "internal"
 }

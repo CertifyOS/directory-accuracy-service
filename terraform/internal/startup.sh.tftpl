@@ -4,11 +4,11 @@
 # startup agent (file-ingestion finding 58).
 set -euo pipefail
 
-NAME=vendor-exchange
+NAME=directory-accuracy
 
 # docker-credential-gcr writes to $HOME/.docker/config.json; the startup-script service can run
 # without HOME, so give it a writable one under /var.
-export HOME=/var/lib/vendor-exchange
+export HOME=/var/lib/directory-accuracy
 mkdir -p "$HOME"
 
 # Pulls authenticate as the VM's service account (roles/artifactregistry.reader, iam.tf).
@@ -30,8 +30,8 @@ secret() {
     "https://secretmanager.googleapis.com/v1/projects/${project}/secrets/$1/versions/latest:access" \
     | sed -n 's/.*"data" *: *"\([^"]*\)".*/\1/p' | base64 -d 2>/dev/null || true
 }
-API_LAYER_CLIENT_SECRET=$(secret vendor-exchange-apilayer-client-secret)
-SENTRY_DSN=$(secret vendor-exchange-sentry-dsn)
+API_LAYER_CLIENT_SECRET=$(secret directory-accuracy-apilayer-client-secret)
+SENTRY_DSN=$(secret directory-accuracy-sentry-dsn)
 SENTRY_ENABLED=false
 [ -n "$SENTRY_DSN" ] && SENTRY_ENABLED=true
 

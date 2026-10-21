@@ -2330,7 +2330,7 @@ paths:
       security:
       - platform-token: []
 info:
-  title: vendor-exchange-service
+  title: directory-accuracy-service
   version: 1.0.0
-  description: "Directory accuracy vendor exchange: scheduled practitioner export\
-    \ to an accuracy vendor, and later ingestion of the vendor's response."
+  description: "Directory accuracy service: scheduled practitioner export to an accuracy\
+    \ vendor, and later ingestion of the vendor's response."
