@@ -55,7 +55,8 @@ Every external dependency has an interim that works today and a swap-in that is 
 - [ ] **IAP access to the DAL and api-layer** (A2). Interim: operator calls answer `503 DAL_UNAVAILABLE`; the smoke script labels it "grant pending". Swap-in: none in code; the same deployment starts passing once `roles/iap.httpsResourceAccessor` is granted on `dal-service-internal` and `api-service-internal` to both VM accounts.
 - [ ] **Service account and Pub/Sub bindings** (A3). Listed in `terraform/internal/iam.tf`. Needed before the first push delivery and for dead lettering.
 - [ ] **Vendor bucket read** (A4). Bucket `certifyos-development-sftp-candor-health` exists; `directory-accuracy-worker@` needs `storage.objects.get` under `from/`. `FinishJob` reads object metadata there (never the file) and `RequestEgressJob` reads it when a prior attempt's cancel is refused.
-- [ ] **Egress changes** (the design's Rollout asks: `npiFilter` above 100, `destination` on the request with the create-only copy, `correlationId` and counts in the object metadata, no manifest beside the file, the completion topic). Interim: the whole lane is proven against WireMock egress and a mocked bucket (`ExportLaneIT`). Swap-in: none in code; section 9 is the live verification once they land.
+- [ ] **Egress changes** (the design's Rollout asks: saved-filter selection with `selection` on the request, `reuseSelectionFrom` and the list-used file (built, egress `main`); `destination` on the request with the create-only copy, `correlationId` and counts in the object metadata, no manifest beside the file, the completion topic with `failureReason` and the `selection` block). Egress must run the `cloud-run-jobs` execution method and have saved-filter selection switched on, or every request gets `400` or `403`.
+- [ ] **Saved-filter store in api-layer** (`api-layer.saved-filter.enabled` on per environment, egress holding its read key). Operators create the tenant's filter there (`POST /filters`) before creating the schedule. Interim: the whole lane is proven against WireMock egress and a mocked bucket (`ExportLaneIT`). Swap-in: none in code; section 9 is the live verification once they land.
 - [ ] **DNS** (A5). `directory-accuracy.internal.certifyos.com A <lb_ip output>` in Route 53. Until then the managed certificate stays `PROVISIONING` and the smoke script uses `LB_IP=`.
 - [ ] **Dedicated Atlas user** (A6). Swap-in: a new version of `directory-accuracy-mongodb-uri`, then `make rollout-api` and `make rollout-worker`.
 - [ ] **Egress completion topic** (A7). Swap-in: set `egress_events_topic` to the topic name and `make tf-apply`. This creates the push subscription and sets the two push settings on the api group, which opens `/internal/vendor-exports/egress-events` to verified tokens from `directory-accuracy-pubsub-push@`.
@@ -88,9 +89,9 @@ Already applied by Terraform: `logging.logWriter`, `monitoring.metricWriter`, `a
 jsonPayload.mdc.exportBatchId="org-xyz-candor-2026-10-001"
 ```
 
-**Metrics.** `/q/metrics` on any VM (port 8080, through an IAP tunnel) in Prometheus form. Names: `vendor_export_tick_duration_seconds`, `vendor_export_tick_schedules_due`, `vendor_export_schedules_by_state{state}`, `vendor_export_batches_by_state{state}`, `vendor_export_batches_created_total{tenant,vendor}`, `vendor_export_selection_practitioners{tenant,vendor}`, `vendor_export_selection_pages_total{tenant}`, `vendor_export_egress_wait_seconds{tenant}`, `vendor_export_egress_failed_total{tenant,reason}`, `vendor_export_completion_source_total{source}`, `vendor_export_event_rejected_total{reason}`, `vendor_export_reconcile_mismatch_total{tenant}`, `vendor_export_jobs_retries_total{job}`, `vendor_export_jobs_final_failures_total{job}`. Alerts E1 to E11 are defined in the design's Observability section and evaluate from the database or from the absence of an audit event.
+**Metrics.** `/q/metrics` on any VM (port 8080, through an IAP tunnel) in Prometheus form. Names: `vendor_export_tick_duration_seconds`, `vendor_export_tick_schedules_due`, `vendor_export_schedules_by_state{state}`, `vendor_export_batches_by_state{state}`, `vendor_export_batches_created_total{tenant,vendor}`, `vendor_export_selection_practitioners{tenant,vendor}` (egress's distinct count for the last batch), `vendor_export_egress_wait_seconds{tenant}`, `vendor_export_egress_failed_total{tenant,reason}`, `vendor_export_completion_source_total{source}`, `vendor_export_event_rejected_total{reason}`, `vendor_export_reconcile_mismatch_total{tenant}`, `vendor_export_jobs_retries_total{job}`, `vendor_export_jobs_final_failures_total{job}`. Alerts E1 to E11 are defined in the design's Observability section and evaluate from the database or from the absence of an audit event.
 
-**JobRunr dashboard.** `make tunnel-dashboard`, then open http://localhost:8000. Jobs are named `select <batchId>`, `request-egress <batchId>`, `deadline-check <batchId>`, `finish <batchId>`; recurring jobs are `vendor-export-tick` (cron `0 6 * * *` UTC) and `vendor-export-reconciler` (hourly).
+**JobRunr dashboard.** `make tunnel-dashboard`, then open http://localhost:8000. Jobs are named `request-egress <batchId>` (a quota wait adds `quota wait <n>`), `deadline-check <batchId>`, `finish <batchId>`; recurring jobs are `vendor-export-tick` (cron `0 6 * * *` UTC) and `vendor-export-reconciler` (hourly).
 
 **A job by batch id, in Mongo.** Job ids are deterministic: `JobIds.of(job, batchId, attempt)`. In `mongosh` against `directory_accuracy`:
 
@@ -110,24 +111,17 @@ db.jobrunr_recurring_jobs.find({}, { _id: 1, scheduleExpression: 1, zoneId: 1 })
 
 Every call needs a platform access token and the `tenant-id` header; the path tenant must be that tenant. Writes need `vendor-export:manage`, reads `vendor-export:read` (once A8 is on). Set `BASE=https://directory-accuracy.internal.certifyos.com` and `H=(-H "Authorization: Bearer $TOKEN" -H "tenant-id: $TENANT" -H "Content-Type: application/json")`.
 
-**Enable a tenant for the vendor.** Create the schedule; creation provisions the tenant's egress template through api-layer (found by name `directory-accuracy candor certify-export-v1`, created from this repository's mappings CSV when absent) and enables the schedule.
+**Enable a tenant for the vendor.** First create the tenant's saved filter in api-layer's filter module (`POST /filters`) and keep its id; the filter module shows how many practitioners it matches. Then create the schedule; creation provisions the tenant's egress template through api-layer (found by name `directory-accuracy candor certify-export-v1`, created from this repository's mappings CSV when absent) and enables the schedule.
 
 ```shell
 curl "${H[@]}" -X PUT "$BASE/v1/vendor-exports/schedules/$TENANT/candor" -d '{
   "cadence": { "type": "monthly", "dayOfMonth": 1 },
   "timezone": "America/New_York",
-  "selection": { "data.delegationStatus": { "in": ["Direct", "Delegated"] }, "credentialingStatus": { "eq": "Approved" } }
+  "filterId": "flt_candor-direct-delegated"
 }'
 ```
 
-201 with the schedule, its `egressTemplateId` and `nextDueAt` (local midnight on the day, never in the past). 409 `SCHEDULE_EXISTS` if one exists: `GET` it and send the body again with its `version` to replace it (200). Selection fields and operators are the design's table (`SELECTION_INVALID` lists every problem); cadence or timezone changes recompute `nextDueAt`, selection or template changes do not.
-
-**Preview what the selection matches today** (no write, api-layer count with page size 1):
-
-```shell
-curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/schedules/$TENANT/candor/preview" -d '{}'                      # the stored selection
-curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/schedules/$TENANT/candor/preview" -d '{"selection":{"credentialingStatus":{"eq":"Approved"}}}'
-```
+201 with the schedule, its `filterId`, `egressTemplateId` and `nextDueAt` (local midnight on the day, never in the past). 409 `SCHEDULE_EXISTS` if one exists: `GET` it and send the body again with its `version` to replace it (200). The filter id is checked for form only (`FILTER_ID_INVALID`: 1-255 letters, digits, `_`, `-`); this service never reads the filter, so a wrong or deleted id shows on the first export as `FAILED` (egress `FILTER_NOT_USABLE`, alert E4). Cadence or timezone changes recompute `nextDueAt`; filter id or template changes do not.
 
 **Run now** (how a pilot's first export starts; the next tick is unaffected because `nextDueAt` advances as the tick would):
 
@@ -149,18 +143,19 @@ curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/schedules/$TENANT/candor/enable"
 ```shell
 curl "${H[@]}" "$BASE/v1/vendor-exports?period=2026-10"             # the tenant's batches, newest first
 curl "${H[@]}" "$BASE/v1/vendor-exports/$TENANT-candor-2026-10-001"
-curl "${H[@]}" "$BASE/v1/vendor-exports/$TENANT-candor-2026-10-001/npis?limit=500"   # pass nextAfter back as after
 ```
 
-What to expect in the document: `state` on the main path `SCHEDULED`, `NPIS_SELECTED`, `EGRESS_REQUESTED`, `EGRESS_COMPLETED`, `DELIVERED`; `selection.practitionersSelected` after selection; `egress.correlationId` (`<batchId>-r<attempt>`), `egress.destination`, `egress.requestedAt` after the request; `egress.completionSource` `EVENT`, `DEADLINE` or `PRIOR_ATTEMPT` and `egress.fileProducedBy` after completion; `file` (name, path, rowCount, bytes, `schemaVersion`), `reconciliation` (`registered`, `inFile`, `match`) and `deliveredAt` once delivered. `EMPTY` means the selection matched nobody; no file is produced for the period.
+What to expect in the document: `state` on the main path `SCHEDULED`, `EGRESS_REQUESTED`, `EGRESS_COMPLETED`, `DELIVERED`; `selection.filterId` from creation, and egress's counts (`requested`, `distinct`, `unmatched`, `parts`, `reusedFrom`, `listUsedUri`) once egress completes, `selection.reEvaluated` when a retry could not reuse the earlier list; `egress.correlationId` (`<batchId>-r<attempt>`), `egress.destination`, `egress.requestedAt` after the request; `egress.completionSource` `EVENT`, `DEADLINE` or `PRIOR_ATTEMPT` and `egress.fileProducedBy` after completion; `file` (name, path, rowCount, bytes, `schemaVersion`), `reconciliation` (`selected`, `inFile`, `match`) and `deliveredAt` once delivered. `EMPTY` means the saved filter matched nobody (egress `NO_MATCHING_PRACTITIONERS`); no file is produced for the period.
 
-**Retry a failed batch** (from `FAILED` only; `failedStep` says where it goes back to):
+**Retry a failed batch** (from `FAILED` only):
 
 ```shell
 curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/$TENANT-candor-2026-10-001/retry" -d '{"reason":"egress fixed"}'
 ```
 
-202 `{exportBatchId, attempt, jobId}`. `SELECT` restarts the selection from the saved page; `EGRESS` cancels the prior attempt's egress job, reuses the pinned template and the registered NPIs, and asks egress again under `-r<attempt>`. If the prior attempt had in fact placed the file, the retry finds it and finishes without a new request (`completionSource = PRIOR_ATTEMPT`).
+202 `{exportBatchId, attempt, jobId}`. The batch goes back to `SCHEDULED`; the request job cancels the prior attempt's egress job, keeps the pinned template, and asks egress again under `-r<attempt>` with `reuseSelectionFrom` the prior attempt, so the same practitioners are exported. When egress cannot reuse that list (unfinished, expired after 7 days, gone), the job sends the filter id instead and the batch records `selection.reEvaluated = true`. If the prior attempt had in fact placed the file, the retry finds it and finishes without a new request (`completionSource = PRIOR_ATTEMPT`).
+
+The same re-request happens without an operator when egress accepts a reuse and then reports `REUSE_SOURCE_UNUSABLE`: the batch goes back to `SCHEDULED` as the next attempt (`EXPORT_REUSE_REFUSED`) and the filter is evaluated again. A `429 SELECTION_QUOTA_EXCEEDED` keeps the batch `SCHEDULED` and asks again after egress's `Retry-After` (300 s), up to 12 times.
 
 **Supersede a delivered batch** (the file turned out wrong; from `DELIVERED` only):
 
@@ -168,11 +163,11 @@ curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/$TENANT-candor-2026-10-001/retry
 curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/$TENANT-candor-2026-10-001/supersede" -d '{"reason":"wrong template version"}'
 ```
 
-201 `{exportBatchId, jobId}`: a new batch at `seq + 1` with the schedule's current selection; the old batch is `SUPERSEDED` and its file stays in the vendor folder (the vendor may have read it). The schedule's `lastBatchId` moves to the new batch; `nextDueAt` does not.
+201 `{exportBatchId, jobId}`: a new batch at `seq + 1` with the schedule's current filter id, which egress evaluates afresh; the old batch is `SUPERSEDED` and its file stays in the vendor folder (the vendor may have read it). The schedule's `lastBatchId` moves to the new batch; `nextDueAt` does not.
 
 **Run the tick by hand** (same code as the 06:00 UTC job, answers its counts): `curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/tick"`.
 
-**Problem codes an operator sees.** 400 `SELECTION_INVALID`, `CADENCE_INVALID`, `TIMEZONE_INVALID`, `PERIOD_INVALID`, `REASON_REQUIRED`, `TEMPLATE_NOT_FOUND`, `INVALID_REQUEST`; 403 `TENANT_MISMATCH` (path tenant is not the header tenant); 404 `SCHEDULE_NOT_FOUND`, `BATCH_NOT_FOUND` (also for another tenant's batch); 409 `SCHEDULE_EXISTS`, `VERSION_STALE`, `ALREADY_ENABLED`, `ALREADY_DISABLED`, `SCHEDULE_DISABLED`, `BATCH_EXISTS`, `TEMPLATE_AMBIGUOUS`, `RETRY_NOT_ALLOWED`, `SUPERSEDE_NOT_ALLOWED`; 503 `API_LAYER_NOT_CONFIGURED`, `API_LAYER_UNAVAILABLE`, `DAL_UNAVAILABLE`.
+**Problem codes an operator sees.** 400 `FILTER_ID_INVALID`, `CADENCE_INVALID`, `TIMEZONE_INVALID`, `PERIOD_INVALID`, `REASON_REQUIRED`, `TEMPLATE_NOT_FOUND`, `INVALID_REQUEST`; 403 `TENANT_MISMATCH` (path tenant is not the header tenant); 404 `SCHEDULE_NOT_FOUND`, `BATCH_NOT_FOUND` (also for another tenant's batch); 409 `SCHEDULE_EXISTS`, `VERSION_STALE`, `ALREADY_ENABLED`, `ALREADY_DISABLED`, `SCHEDULE_DISABLED`, `BATCH_EXISTS`, `TEMPLATE_AMBIGUOUS`, `RETRY_NOT_ALLOWED`, `SUPERSEDE_NOT_ALLOWED`; 503 `API_LAYER_NOT_CONFIGURED`, `API_LAYER_UNAVAILABLE`, `DAL_UNAVAILABLE`.
 
 ## 8. When something is wrong
 
@@ -183,9 +178,9 @@ curl "${H[@]}" -X POST "$BASE/v1/vendor-exports/$TENANT-candor-2026-10-001/super
 | ready lists Mongo DOWN | Atlas access list, VPC | VM not in `default` subnet range 10.128.0.0/9 |
 | no `EXPORT_TICK_COMPLETED` by 06:30 UTC | `jobrunr_background_job_servers` heartbeat, worker VM | worker down across the tick; alert E1; the next tick catches up |
 | batch stuck non-terminal | `vendor_export_events` for the batch, `jobrunr_jobs` by name | reconciler re-enqueues after `RECONCILER_STALE_MINUTES` and logs `EXPORT_RECONCILER_REENQUEUED`; alert E2 |
-| batch `FAILED`, `failedStep SELECT` | `lastError`; `EXPORT_BATCH_FAILED` detail `cause JOB_RETRIES_EXHAUSTED` | api-layer unreachable or unconfigured through all retries; fix, then retry (section 7) |
-| batch `FAILED`, `failedStep EGRESS` | `EXPORT_BATCH_FAILED` detail `cause`: `EGRESS_FAILED` (egress said so), `EGRESS_DID_NOT_FINISH` (48 h, cancelled), `FILE_NOT_FOUND` (completed but no object), `JOB_RETRIES_EXHAUSTED` (request never accepted) | ask egress, then retry; the registered NPIs are reused |
-| `DELIVERED` with `reconciliation.match false` | `NPIS_RECONCILED` detail, `GET .../npis` against the file | egress dropped or duplicated rows; alert E6; supersede after the fix |
+| batch `FAILED`, `failedStep EGRESS` | `EXPORT_BATCH_FAILED` detail `cause`: `EGRESS_FAILED` (egress said so; `lastError` carries its message, `FILTER_NOT_USABLE` for a wrong or deleted filter id), `EGRESS_REFUSED` (egress refused the request: `403 SELECTION_SOURCE_DISABLED` or a `400`, `lastError` has its code and message), `EGRESS_DID_NOT_FINISH` (48 h, cancelled), `FILE_NOT_FOUND` (completed but no object), `SELECTION_COUNTS_MISSING` (egress reported no selection counts), `JOB_RETRIES_EXHAUSTED` (request never accepted, or the template pin failed) | fix the cause (the filter in api-layer, egress, the switch), then retry; the retry reuses the prior attempt's list when egress still has it |
+| batch back in `SCHEDULED` at a higher attempt with no operator retry | `EXPORT_REUSE_REFUSED` | egress could not reuse a retry's list after accepting it; the next attempt evaluates the filter again, nothing to do |
+| `DELIVERED` with `reconciliation.match false` | `EXPORT_RECONCILED` detail; egress's list-used file at `selection.listUsedUri` (kept 7 days) against the file | egress dropped or duplicated rows; alert E6; supersede after the fix |
 | `EXPORT_EGRESS_STALE` events | egress job status for the correlation id | egress slow; check 2 at request + 48 h fails the batch if still running |
 | `EXPORT_EVENT_REJECTED` events | detail `reason` `UNPARSEABLE`, `UNKNOWN_SCHEMA`, `TENANT_MISMATCH` | egress changed the event schema, or a subscription filter is wrong; alert E5 |
 | push endpoint 401 | `PUSH_*` code in the problem body | not configured (A7 pending), wrong audience, token not from the push account |
@@ -196,7 +191,7 @@ Run this once, in order, as soon as the Pulumi deployment exists and the egress 
 
 1. Readiness lists `api-layer` UP (A1 and A2 landed): `curl -s "$BASE/q/health/ready" | jq .checks`.
 2. Create the schedule disabled-safe: `PUT` as in section 7, then `POST .../disable -d '{"reason":"pilot: run by hand first"}'`. Confirm in api-layer that the template `directory-accuracy candor certify-export-v1` exists for the tenant and its mappings CSV is this repository's `certify-export-v1.mappings.csv` (the first live create is the gate for the attribute keys, finding 69).
-3. Preview: `POST .../preview -d '{}'`. The count must be the one the vendor expects for the pilot; adjust the selection with `PUT` and the `version` until it is.
+3. Confirm the filter's count in api-layer's filter module: it must be the one the vendor expects for the pilot. Adjust the filter there (or point the schedule at another filter id with `PUT` and the `version`) until it is.
 4. Enable and run: `POST .../enable -d '{"reason":"pilot","catchUp":false}'`, then `POST .../run-now`. Keep the `exportBatchId`.
 5. Watch the batch reach `EGRESS_REQUESTED` within a minute (`GET .../$ID` or the JobRunr dashboard through `make tunnel-dashboard`). Check the egress job in its Activity Center under the correlation id `$ID-r1`.
 6. Watch for `EGRESS_COMPLETED` by the event (`completionSource EVENT`) and then `DELIVERED`. If the event does not arrive within six hours the deadline check completes it (`DEADLINE`) and `EXPORT_EVENT_MISSED` is written: that is the push subscription (A7) to fix, not the batch.
@@ -204,7 +199,7 @@ Run this once, in order, as soon as the Pulumi deployment exists and the egress 
    ```shell
    gcloud storage objects describe "gs://certifyos-development-sftp-candor-health/from/$TENANT/${TENANT}_${ID}_$(date -u +%Y%m%d).csv"      --project certifyos-development --format='value(size,metadata)'
    ```
-   `metadata.complete=true`, `metadata.correlationId=$ID-r1`, `metadata.totalRecords` equal to `reconciliation.registered` in the batch, and no `.manifest.json` beside the file.
+   `metadata.complete=true`, `metadata.correlationId=$ID-r1`, `metadata.totalRecords` equal to `reconciliation.selected` (egress's `selection.distinct`) in the batch, and no `.manifest.json` beside the file. Egress's list-used file is at the batch's `selection.listUsedUri`.
 8. Read the audit trail and compare with finding 89's first sequence: in `mongosh`, `db.vendor_export_events.find({ exportBatchId: "$ID" }).sort({ _id: 1 }).map(e => e.type)`.
 9. Record the outcome as the next numbered finding in `docs/decisions.md`, with the batch id, the object path and the trail; tick the boxes in section 4 that the run proved.
 
@@ -215,13 +210,13 @@ The design's alerts E1 to E11 (Observability section). None is created by this r
 | # | Condition (design) | Severity | Signal to evaluate | Response, and where the command is |
 | --- | --- | --- | --- | --- |
 | E1 | No `EXPORT_TICK_COMPLETED` for 26 hours | Page | Absence of an `AUDIT` line with `type=EXPORT_TICK_COMPLETED` for 26 h | No job server was alive across 06:00 UTC. Check the worker group and the heartbeat (section 8, "no EXPORT_TICK_COMPLETED"). Due schedules stay due; the next tick catches up, or run `POST /v1/vendor-exports/tick` (section 7). |
-| E2 | Batch untouched in `SCHEDULED`, `NPIS_SELECTED` or `EGRESS_COMPLETED` for `reconcilerStaleMinutes` | Warn; page if it repeats for one batch | A worker log line starting `EXPORT_RECONCILER_REENQUEUED` (label `batch=`); page when the same batch id appears twice within 2 h | The reconciler re-enqueued the job. If it repeats, the job keeps failing before its first write: read the batch's events (section 6) and the job in the dashboard, fix the cause, then `retry` once it is `FAILED` (section 7). |
+| E2 | Batch untouched in `SCHEDULED` or `EGRESS_COMPLETED` for `reconcilerStaleMinutes` | Warn; page if it repeats for one batch | A worker log line starting `EXPORT_RECONCILER_REENQUEUED` (label `batch=`); page when the same batch id appears twice within 2 h | The reconciler re-enqueued the job. If it repeats, the job keeps failing before its first write: read the batch's events (section 6) and the job in the dashboard, fix the cause, then `retry` once it is `FAILED` (section 7). |
 | E3 | `EXPORT_EGRESS_STALE` written (check 1 found egress still running) | Warn | `AUDIT` line `type=EXPORT_EGRESS_STALE` (`check=1`) | Egress is slow or stuck on this correlation id. Check its job in the Activity Center; nothing to do here yet, check 2 decides at request + `abandonHours` (48 h). |
-| E4 | `EXPORT_BATCH_FAILED`, any cause | Page | `AUDIT` line `type=EXPORT_BATCH_FAILED`, with `cause=` (`JOB_RETRIES_EXHAUSTED`, `EGRESS_FAILED`, `EGRESS_DID_NOT_FINISH`, `FILE_NOT_FOUND`) | Find the cause in section 8's two `FAILED` rows, fix it (api-layer, egress, the grant), then re-run with `retry` (section 7); the registered NPIs are reused. |
+| E4 | `EXPORT_BATCH_FAILED`, any cause | Page | `AUDIT` line `type=EXPORT_BATCH_FAILED`, with `cause=` (`JOB_RETRIES_EXHAUSTED`, `EGRESS_FAILED`, `EGRESS_REFUSED`, `EGRESS_DID_NOT_FINISH`, `FILE_NOT_FOUND`, `SELECTION_COUNTS_MISSING`) | Find the cause in section 8's `FAILED` row, fix it (the saved filter, egress, the switch, the grant), then re-run with `retry` (section 7); the retry reuses the prior attempt's list when egress still has it. |
 | E5 | A dead-letter message, or `EXPORT_EVENT_REJECTED` twice in an hour | Page | Pub/Sub metric `subscription/dead_letter_message_count` on `vendor-export-egress-events` above 0; or two `AUDIT` lines `type=EXPORT_EVENT_REJECTED` in 60 min (`reason=` says `UNPARSEABLE`, `UNKNOWN_SCHEMA` or `TENANT_MISMATCH`) | The event contract or the subscription is broken: egress changed the message schema, or the subscription filter is wrong. Compare the dead-lettered body with `EgressEvent`; fix on the egress or subscription side. Batches are safe: the deadline check completes them (E7 will fire). |
-| E6 | `reconciliation.match = false` on a delivered batch | Warn | `AUDIT` line `type=NPIS_RECONCILED` with `match=false` | Egress wrote fewer or more practitioners than were registered. Diff `GET …/{exportBatchId}/npis` against the file (section 7), raise with egress, then re-deliver with `supersede` once fixed (section 7). |
+| E6 | `reconciliation.match = false` on a delivered batch | Warn | `AUDIT` line `type=EXPORT_RECONCILED` with `match=false` | Egress wrote fewer or more practitioners than it selected. Diff egress's list-used file (`selection.listUsedUri`, kept 7 days) against the file, raise with egress, then re-deliver with `supersede` once fixed (section 7). |
 | E7 | A batch completed with `completionSource = DEADLINE` | Warn | `AUDIT` line `type=EXPORT_EGRESS_COMPLETED` with `completionSource=DEADLINE` | The push event never arrived: the batch is fine, the event path is not. Check the topic, the subscription (A7 in section 4), the push identity (section 8, "push endpoint 401") and dead letters. |
-| E8 | A batch ended `EMPTY` | Warn | `AUDIT` line `type=EXPORT_BATCH_EMPTY` | The selection matched nobody, usually a criteria mistake. `preview` the stored selection, correct it with `PUT` and the current `version`, then `run-now` (section 7); the empty batch stays as the period's record until superseded by the next period. |
+| E8 | A batch ended `EMPTY` | Warn | `AUDIT` line `type=EXPORT_BATCH_EMPTY` (detail `filterId`, `failureReason`) | The saved filter matched nobody, usually a filter mistake. Check the filter's count in api-layer's filter module, correct the filter (or point the schedule at another id with `PUT` and the current `version`); the empty batch stays as the period's record, and the next period evaluates the filter again. |
 | E10 | JobRunr heartbeat absent on every worker VM for 5 minutes | Page | `jobrunr_background_job_servers.lastHeartbeat` older than 5 min for every row (query in section 6), or the worker group below size 1 (`compute instance_group/size`) | No job server is running; nothing executes. Check the worker VM's serial console and logs (section 8), roll the group (`make rollout-worker`, section 3). Missed ticks catch up on the next run. |
 | E11 | api group below target size, or the load balancer health check failing, for 5 minutes | Page | `compute instance_group/size` of `directory-accuracy-api` below 2, or the backend service's healthy-instance count at 0 | Operators and the completion event cannot reach the service. Section 8's first row (serial console: image pull, Mongo URI); events are not lost, Pub/Sub retries them and the deadline check covers the rest. |
 
