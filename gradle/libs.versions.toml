@@ -2,7 +2,7 @@
 # libs.plugins.*; Renovate bumps entries here. No SNAPSHOT and no mavenLocal() anywhere.
 
 [versions]
-quarkus = "3.33.3"            # pinned with JobRunr; gated by file-ingestion-service 2026-09-21
+quarkus = "3.33.4"            # pinned with JobRunr; gated by file-ingestion-service 2026-09-21; 3.33.4 for Netty CVEs (CP-44812)
 jobrunr = "8.8.2"
 quarkiverse-secret-manager = "2.15.0"
 quarkiverse-logging-sentry = "2.3.4"   # 2.1.3 fails to augment on Quarkus 3.33.3
