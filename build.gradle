@@ -11,7 +11,7 @@ repositories {
     mavenCentral()
 }
 
-group "com.certifyos.vendor_exchange"
+group "com.certifyos.directory_accuracy"
 version = "1.0.0"
 
 quarkus {

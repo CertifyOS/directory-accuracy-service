@@ -1,0 +1,232 @@
+package com.certifyos.directory_accuracy.ingestion.release;
+
+import com.certifyos.directory_accuracy.ingestion.staging.FieldLevel;
+import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
+import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendationRepository;
+import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus;
+import com.certifyos.directory_accuracy.persistence.Collections;
+import com.certifyos.directory_accuracy.persistence.Documents;
+import com.mongodb.client.ClientSession;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
+import jakarta.enterprise.context.ApplicationScoped;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+
+/**
+ * The release lane's own reads of {@code field_recommendations} and its one write mark, beside the
+ * staging repository's moves ({@code decide}, {@code moveAll}, {@code countReleasing}), which this
+ * lane also uses. Kept here so the staging repository stays within its size and the release queries
+ * sit with their only caller. Every read takes the tenant and carries a limit.
+ */
+@ApplicationScoped
+public class ReleaseFieldRepository {
+
+    private final Collections collections;
+    private final FieldRecommendationRepository staged;
+
+    public ReleaseFieldRepository(Collections collections, FieldRecommendationRepository staged) {
+        this.collections = collections;
+        this.staged = staged;
+    }
+
+    /** The staging repository, whose guarded moves and reads the release lane uses as they are. */
+    public FieldRecommendationRepository staged() {
+        return staged;
+    }
+
+    /**
+     * The open release of a practitioner: one whose fields still wait in {@code RELEASE_REQUESTED},
+     * which a new request joins. Read inside the request's transaction, on {@code
+     * field_recs_practitioner}.
+     *
+     * @param session the request's transaction
+     * @param tenantId the tenant
+     * @param certifyPractitionerId the practitioner
+     * @return the release id, or empty when the practitioner has no open release
+     */
+    public Optional<String> openRelease(ClientSession session, String tenantId, String certifyPractitionerId) {
+        Document open = recommendations()
+                .find(
+                        session,
+                        Filters.and(
+                                Filters.eq("tenantId", tenantId),
+                                Filters.eq("practitioner.certifyPractitionerId", certifyPractitionerId),
+                                Filters.eq("reviewStatus", ReviewStatus.RELEASE_REQUESTED.name()),
+                                Filters.exists("goldenRecordUpdate.releaseId")))
+                .projection(Projections.include("goldenRecordUpdate.releaseId"))
+                .sort(Sorts.ascending("_id"))
+                .limit(1)
+                .first();
+        return Optional.ofNullable(open)
+                .flatMap(doc -> Documents.nested(doc, "goldenRecordUpdate"))
+                .map(update -> update.getString("releaseId"));
+    }
+
+    /**
+     * A batch's {@code APPROVED} documents of the given fields, for a bulk release of the batch, on
+     * {@code field_recs_batch_counts}.
+     *
+     * @param tenantId the tenant
+     * @param exportBatchId the batch
+     * @param fields the fields to take
+     * @param limit the most documents to return, at least 1
+     * @return the documents by id
+     */
+    public List<FieldRecommendation> approvedInBatch(
+            String tenantId, String exportBatchId, Collection<String> fields, int limit) {
+        return read(
+                Filters.and(
+                        Filters.eq("tenantId", tenantId),
+                        Filters.eq("exportBatchId", exportBatchId),
+                        Filters.eq("reviewStatus", ReviewStatus.APPROVED.name()),
+                        Filters.in("field", fields)),
+                limit);
+    }
+
+    /**
+     * The {@code RELEASING} fields of one Golden entity, across releases: a practitioner's own fields
+     * (no location) on {@code field_recs_practitioner}, or every practitioner's fields at one location
+     * on {@code field_recs_releasing_location}. The read-back finishes them on the entity's event.
+     *
+     * @param tenantId the tenant
+     * @param certifyId the practitioner's or the location's certify id
+     * @param level which of the two the id is
+     * @param limit the most documents to return, at least 1
+     * @return the documents by id
+     */
+    public List<FieldRecommendation> releasingAt(String tenantId, String certifyId, FieldLevel level, int limit) {
+        Bson entity = level == FieldLevel.LOCATION
+                ? Filters.eq("location.certifyLocationId", certifyId)
+                : Filters.and(
+                        Filters.eq("practitioner.certifyPractitionerId", certifyId), Filters.exists("location", false));
+        return read(
+                Filters.and(
+                        Filters.eq("tenantId", tenantId),
+                        entity,
+                        Filters.eq("reviewStatus", ReviewStatus.RELEASING.name())),
+                limit);
+    }
+
+    /**
+     * How many fields of other releases are {@code RELEASING} at any of the given locations and not
+     * written yet: the window in which a release reads the shared candor location slice, merges and
+     * writes it whole. Once a write is recorded the slice holds it, so the next release's read sees it;
+     * a written field waiting for its read-back does not block. On {@code field_recs_decided_list}
+     * (the state is one of the decided states it covers).
+     *
+     * @param tenantId the tenant
+     * @param certifyLocationIds the locations the release writes
+     * @param releaseId the release asking, whose own fields are not counted
+     * @return the count
+     */
+    public long countUnwrittenReleasingAt(String tenantId, Collection<String> certifyLocationIds, String releaseId) {
+        if (certifyLocationIds.isEmpty()) {
+            return 0;
+        }
+        return recommendations()
+                .countDocuments(Filters.and(
+                        Filters.eq("tenantId", tenantId),
+                        Filters.eq("reviewStatus", ReviewStatus.RELEASING.name()),
+                        Filters.in("location.certifyLocationId", certifyLocationIds),
+                        Filters.ne("goldenRecordUpdate.releaseId", releaseId),
+                        Filters.exists("goldenRecordUpdate.writtenAt", false)));
+    }
+
+    /**
+     * Fields of any tenant left {@code RELEASE_REQUESTED} and untouched since {@code before}, oldest
+     * first, for the release reconciler: a request whose job was never enqueued, or whose job died
+     * before its claim. A release waiting for another one is put back every minute, which refreshes
+     * {@code updatedAt}, so it is never among these. On {@code field_recs_release_requested}.
+     *
+     * @param before the staleness cut-off
+     * @param limit the most documents to return, at least 1
+     * @return the documents, oldest first
+     */
+    public List<FieldRecommendation> staleRequested(Instant before, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1, got " + limit);
+        }
+        List<FieldRecommendation> docs = new ArrayList<>();
+        for (Document doc : recommendations()
+                .find(Filters.and(
+                        Filters.eq("reviewStatus", ReviewStatus.RELEASE_REQUESTED.name()),
+                        Filters.lt("updatedAt", before)))
+                .sort(Sorts.ascending("updatedAt", "_id"))
+                .limit(limit)) {
+            docs.add(FieldRecommendation.fromDocument(doc));
+        }
+        return docs;
+    }
+
+    /**
+     * Sets {@code updatedAt} on a release's {@code RELEASE_REQUESTED} fields, for the release
+     * reconciler, whose re-enqueued job id is keyed on that time. No state or version change.
+     *
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param now the reconciler's pass time
+     * @return how many fields were touched
+     */
+    public long touchRequested(String tenantId, String releaseId, Instant now) {
+        return recommendations()
+                .updateMany(
+                        Filters.and(
+                                Filters.eq("tenantId", tenantId),
+                                Filters.eq("goldenRecordUpdate.releaseId", releaseId),
+                                Filters.eq("reviewStatus", ReviewStatus.RELEASE_REQUESTED.name())),
+                        Updates.set("updatedAt", now))
+                .getModifiedCount();
+    }
+
+    /**
+     * Records the DAL write on some {@code RELEASING} fields of a release: the caller's {@code $set}s
+     * on {@code goldenRecordUpdate}, {@code updatedAt}, and the version bump every write makes. No
+     * state change and no event (the release job's {@code written} step).
+     *
+     * @param session the transaction
+     * @param tenantId the tenant
+     * @param releaseId the release
+     * @param ids the fields one slice write covered
+     * @param sets the {@code goldenRecordUpdate.*} values
+     * @param now the write time
+     * @return how many fields were marked
+     */
+    public long markWritten(
+            ClientSession session, String tenantId, String releaseId, List<String> ids, Bson sets, Instant now) {
+        return recommendations()
+                .updateMany(
+                        session,
+                        Filters.and(
+                                Filters.in("_id", ids),
+                                Filters.eq("tenantId", tenantId),
+                                Filters.eq("goldenRecordUpdate.releaseId", releaseId),
+                                Filters.eq("reviewStatus", ReviewStatus.RELEASING.name())),
+                        Updates.combine(sets, Updates.set("updatedAt", now), Updates.inc("version", 1L)))
+                .getModifiedCount();
+    }
+
+    List<FieldRecommendation> read(Bson filter, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1, got " + limit);
+        }
+        List<FieldRecommendation> docs = new ArrayList<>();
+        for (Document doc :
+                recommendations().find(filter).sort(Sorts.ascending("_id")).limit(limit)) {
+            docs.add(FieldRecommendation.fromDocument(doc));
+        }
+        return docs;
+    }
+
+    MongoCollection<Document> recommendations() {
+        return collections.fieldRecommendations();
+    }
+}

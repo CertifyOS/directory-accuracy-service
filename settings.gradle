@@ -4,4 +4,4 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
-rootProject.name='vendor-exchange-service'
+rootProject.name='directory-accuracy-service'
