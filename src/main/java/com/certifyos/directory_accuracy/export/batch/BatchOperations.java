@@ -112,7 +112,9 @@ public class BatchOperations {
 
     /**
      * Retries a failed batch: attempt + 1, back to {@code SCHEDULED}, the egress request job. That job
-     * cancels the prior attempt first and asks egress to reuse its frozen list.
+     * cancels the prior attempt first and asks egress to reuse its frozen list. The batch takes the
+     * schedule's current filter id, which egress evaluates only when the reuse is refused: an operator
+     * who fixed a wrong or deleted filter id on the schedule retries the failed batch with the fix.
      *
      * @param batch the batch, from {@link #require}
      * @param reason mandatory
@@ -129,8 +131,16 @@ public class BatchOperations {
         int attempt = batch.attempt() + 1;
         UUID jobId = JobIds.of(RequestEgressJob.NAME, batch.id(), attempt);
         Instant now = clock.instant();
+        String filterBefore = batch.selection().filterId();
+        String filterId = schedules
+                .find(batch.tenantId(), batch.vendor())
+                .map(Schedule::filterId)
+                .orElse(filterBefore);
         Bson updates = Updates.combine(
-                Updates.set("attempt", attempt), Updates.unset("failedStep"), Updates.unset("lastError"));
+                Updates.set("attempt", attempt),
+                Updates.unset("failedStep"),
+                Updates.unset("lastError"),
+                Updates.set("selection.filterId", filterId));
         AuditEvent event = AuditEvent.forBatch(
                         AuditEventType.EXPORT_RETRY_REQUESTED, batch.tenantId(), batch.vendor(), batch.id(), attempt)
                 .actor(actor)
@@ -140,6 +150,8 @@ public class BatchOperations {
                 .detail("failedStep", batch.failedStep().name())
                 .detail("newAttempt", attempt)
                 .detail("reason", why)
+                .detail("filterId", filterId)
+                .detail("filterIdBefore", filterId.equals(filterBefore) ? null : filterBefore)
                 .build();
         boolean moved = transactions.run(session -> {
             boolean ok = batches.transition(session, batch.id(), BatchState.FAILED, BatchState.SCHEDULED, now, updates);

@@ -190,6 +190,8 @@ class BatchResourceIT {
                 after.egress().correlationId(),
                 "the prior correlation stays for the cancel and the reuse");
         Assertions.assertEquals(
+                EgressFixtures.FILTER_ID, after.selection().filterId(), "no schedule, the batch's id stays");
+        Assertions.assertEquals(
                 StateName.ENQUEUED, storage.getJobById(expectedJob).getState());
         AuditEvent event = audit.findForBatch(failed.id(), 20).stream()
                 .filter(found -> found.type() == AuditEventType.EXPORT_RETRY_REQUESTED)
@@ -201,6 +203,41 @@ class BatchResourceIT {
         Assertions.assertEquals(2, event.detail().get("newAttempt"));
         Assertions.assertEquals("egress fixed", event.detail().get("reason"));
         Assertions.assertEquals(2, event.attempt());
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = "batch@certifyos.com")})
+    void retryTakesTheSchedulesCurrentFilterId() {
+        ExportBatch failed = failedAt("retry-fix");
+        Schedule fixed = Schedule.create(
+                TENANT,
+                "retry-fix",
+                Cadence.monthly(1),
+                ZoneId.of("UTC"),
+                "flt-fixed",
+                "tpl-1",
+                Instant.now().plusSeconds(86400),
+                "user:ops",
+                Instant.now());
+        transactions.run(session -> {
+            schedules.insert(session, fixed);
+            return null;
+        });
+
+        member().body("{\"reason\":\"filter id fixed on the schedule\"}")
+                .post(BASE + "/" + failed.id() + "/retry")
+                .then()
+                .statusCode(202);
+
+        ExportBatch after = batches.find(failed.id()).orElseThrow();
+        Assertions.assertEquals("flt-fixed", after.selection().filterId());
+        AuditEvent event = audit.findForBatch(failed.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_RETRY_REQUESTED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals("flt-fixed", event.detail().get("filterId"));
+        Assertions.assertEquals(EgressFixtures.FILTER_ID, event.detail().get("filterIdBefore"));
     }
 
     @Test
