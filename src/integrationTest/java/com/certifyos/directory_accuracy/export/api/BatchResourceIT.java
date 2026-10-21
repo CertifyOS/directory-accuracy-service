@@ -119,7 +119,7 @@ class BatchResourceIT {
                 .body("state", Matchers.equalTo("EGRESS_REQUESTED"))
                 .body("attempt", Matchers.equalTo(1))
                 .body("selection.filterId", Matchers.equalTo(EgressFixtures.FILTER_ID))
-                .body("selection", Matchers.not(Matchers.hasKey("distinct")))
+                .body("selection.distinct", Matchers.nullValue())
                 .body("egress.correlationId", Matchers.equalTo(batch.egress().correlationId()))
                 .body(
                         "egress.destination.objectName",
