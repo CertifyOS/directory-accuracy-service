@@ -10,7 +10,7 @@ import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
 import com.certifyos.directory_accuracy.ingestion.InboundFixtures;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -153,7 +153,7 @@ class ArrivalResourceIT {
     }
 
     private double ignored(String eventType) {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE)
                 .tag("eventType", eventType)
                 .counter();
         return found == null ? 0 : found.count();

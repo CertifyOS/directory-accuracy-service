@@ -4,7 +4,7 @@ import com.certifyos.directory_accuracy.ApiTestProfile;
 import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.audit.Actors;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
@@ -23,7 +23,7 @@ import com.certifyos.directory_accuracy.ingestion.inbound.UnmatchedOperations;
 import com.certifyos.directory_accuracy.ingestion.inbound.UnmatchedUpload;
 import com.certifyos.directory_accuracy.ingestion.inbound.UnmatchedUploadRepository;
 import com.certifyos.directory_accuracy.ingestion.jobs.RequestIngestionJob;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -124,7 +124,7 @@ class ArrivalHandlerIT {
         ExportBatch acknowledged = batches.find(batch.id()).orElseThrow();
         Assertions.assertNotNull(acknowledged.acknowledgedAt());
         Assertions.assertEquals(uploadId, acknowledged.inboundBatchId());
-        Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
+        Assertions.assertEquals(1.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
     }
 
     @Test
@@ -153,7 +153,7 @@ class ArrivalHandlerIT {
                 .first();
         Assertions.assertNotNull(event);
         Assertions.assertEquals(firstUpload, event.get("detail", Document.class).getString("firstUploadId"));
-        Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, tenant));
+        Assertions.assertEquals(1.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, tenant));
     }
 
     @Test
@@ -176,7 +176,7 @@ class ArrivalHandlerIT {
         Assertions.assertEquals(
                 entryAfterFirst, inbound.findByUploadId(uploadId).orElseThrow().entry(), "the entry was not written");
         Assertions.assertEquals(events, eventsFor(batch.id()), "no event for a redelivery");
-        Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
+        Assertions.assertEquals(1.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
     }
 
     @Test
@@ -430,7 +430,7 @@ class ArrivalHandlerIT {
     void disabledServiceRefusesForRedeliveryWithoutWriting() {
         String tenant = "arrival-disabled";
         ExportBatch batch = InboundFixtures.deliveredBatch(transactions, batches, collections, tenant);
-        VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
+        DirectoryAccuracyConfig disabled = Mockito.mock(DirectoryAccuracyConfig.class, Answers.RETURNS_DEEP_STUBS);
         Mockito.when(disabled.enabled()).thenReturn(false);
         Mockito.when(disabled.ingestion().completenessSignal()).thenReturn("DATA_FILE");
         ArrivalHandler off = new ArrivalHandler(batches, lifecycle, unmatchedOperations, requests, disabled, clock);
@@ -449,7 +449,7 @@ class ArrivalHandlerIT {
         Assertions.assertTrue(unmatched
                 .find(Ids.uploadId(InboundFixtures.VENDOR_BUCKET, badName, "8002"))
                 .isEmpty());
-        Assertions.assertEquals(0.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
+        Assertions.assertEquals(0.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
     }
 
     @Test
@@ -570,7 +570,7 @@ class ArrivalHandlerIT {
     }
 
     private double unmatchedCount(String tenant, String reason) {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_ARRIVALS_UNMATCHED)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_UNMATCHED)
                 .tag("tenant", tenant)
                 .tag("reason", reason)
                 .counter();
@@ -578,7 +578,7 @@ class ArrivalHandlerIT {
     }
 
     private double ignored(String eventType) {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE)
                 .tag("eventType", eventType)
                 .counter();
         return found == null ? 0 : found.count();

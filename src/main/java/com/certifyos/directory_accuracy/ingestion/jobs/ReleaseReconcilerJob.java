@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.ingestion.jobs;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.ingestion.release.ReleaseFieldRepository;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -45,13 +45,13 @@ public class ReleaseReconcilerJob {
 
     private static final Logger LOG = Logger.getLogger(ReleaseReconcilerJob.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final ReleaseFieldRepository releaseFields;
     private final IngestionJobEnqueuer enqueuer;
     private final Clock clock;
 
     public ReleaseReconcilerJob(
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             ReleaseFieldRepository releaseFields,
             IngestionJobEnqueuer enqueuer,
             Clock clock) {

@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.export.jobs;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
@@ -42,12 +42,13 @@ public class ReconcilerJob {
 
     private static final Logger LOG = Logger.getLogger(ReconcilerJob.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final ExportBatchRepository batches;
     private final JobEnqueuer enqueuer;
     private final Clock clock;
 
-    public ReconcilerJob(VendorExchangeConfig cfg, ExportBatchRepository batches, JobEnqueuer enqueuer, Clock clock) {
+    public ReconcilerJob(
+            DirectoryAccuracyConfig cfg, ExportBatchRepository batches, JobEnqueuer enqueuer, Clock clock) {
         this.cfg = cfg;
         this.batches = batches;
         this.enqueuer = enqueuer;

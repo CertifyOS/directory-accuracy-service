@@ -15,7 +15,7 @@ import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundNames;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -134,8 +134,8 @@ class IngestionJobRunrGateIT {
                         ArgumentMatchers.anyString(),
                         ArgumentMatchers.anyString()))
                 .thenThrow(new IllegalStateException("archive store unavailable"));
-        double retries = counter(VendorExchangeMetrics.INGESTION_JOBS_RETRIES, "RequestIngestionJob");
-        double finals = counter(VendorExchangeMetrics.INGESTION_JOBS_FINAL_FAILURES, "RequestIngestionJob");
+        double retries = counter(DirectoryAccuracyMetrics.INGESTION_JOBS_RETRIES, "RequestIngestionJob");
+        double finals = counter(DirectoryAccuracyMetrics.INGESTION_JOBS_FINAL_FAILURES, "RequestIngestionJob");
 
         UUID jobId =
                 enqueuer.requestIngestion(seeded.batch().id(), seeded.entry().uploadId(), 1);
@@ -158,9 +158,9 @@ class IngestionJobRunrGateIT {
         Assertions.assertEquals(2, ((Number) event.detail().get("jobAttempts")).intValue(), "one run, one retry");
         Assertions.assertEquals(jobId.toString(), event.jobId(), "the exhausted job is named on the event");
         Assertions.assertEquals(
-                retries + 1, counter(VendorExchangeMetrics.INGESTION_JOBS_RETRIES, "RequestIngestionJob"));
+                retries + 1, counter(DirectoryAccuracyMetrics.INGESTION_JOBS_RETRIES, "RequestIngestionJob"));
         Assertions.assertEquals(
-                finals + 1, counter(VendorExchangeMetrics.INGESTION_JOBS_FINAL_FAILURES, "RequestIngestionJob"));
+                finals + 1, counter(DirectoryAccuracyMetrics.INGESTION_JOBS_FINAL_FAILURES, "RequestIngestionJob"));
     }
 
     @Test
@@ -206,15 +206,16 @@ class IngestionJobRunrGateIT {
     @Test
     void exhaustedDeadlineCheckLeavesAnArchivingEntryAlone() {
         Seeded seeded = fresh("ingate-archiving", InboundFileState.ARCHIVING);
-        double finals = counter(VendorExchangeMetrics.INGESTION_JOBS_FINAL_FAILURES, "IngestionDeadlineCheckJob");
+        double finals = counter(DirectoryAccuracyMetrics.INGESTION_JOBS_FINAL_FAILURES, "IngestionDeadlineCheckJob");
 
         UUID jobId = enqueuer.deadlineCheck(seeded.batch().id(), seeded.entry().uploadId(), 1, Instant.now());
 
         awaitJobFailed(jobId);
         Awaitility.await()
                 .atMost(Duration.ofSeconds(30))
-                .until(() -> counter(VendorExchangeMetrics.INGESTION_JOBS_FINAL_FAILURES, "IngestionDeadlineCheckJob")
-                        >= finals + 1);
+                .until(() ->
+                        counter(DirectoryAccuracyMetrics.INGESTION_JOBS_FINAL_FAILURES, "IngestionDeadlineCheckJob")
+                                >= finals + 1);
         Awaitility.await()
                 .during(Duration.ofSeconds(3))
                 .atMost(Duration.ofSeconds(10))

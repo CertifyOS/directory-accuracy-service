@@ -5,7 +5,7 @@ import com.certifyos.directory_accuracy.clients.ArchiveStore;
 import com.certifyos.directory_accuracy.clients.FileIngestionClient;
 import com.certifyos.directory_accuracy.clients.FileIngestionRegisterRequest;
 import com.certifyos.directory_accuracy.clients.FileIngestionRegisterResponse;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.jobs.JobLogContext;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
@@ -121,7 +121,7 @@ public class RequestIngestionJob implements JobRequestHandler<RequestIngestionJo
         if (entry.state() == InboundFileState.RECEIVED && !lifecycle.archiving(located, clock.instant())) {
             return;
         }
-        VendorExchangeConfig cfg = support.config();
+        DirectoryAccuracyConfig cfg = support.config();
         String archiveBucket = cfg.ingestion().archiveBucket();
         String fileName = fileName(entry.objectName());
         String archiveObject = InboundNames.archiveObject(batch.tenantId(), batch.id(), entry.generation(), fileName);

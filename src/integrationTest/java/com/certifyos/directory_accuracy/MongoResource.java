@@ -22,7 +22,7 @@ public class MongoResource implements QuarkusTestResourceLifecycleManager {
     @Override
     public Map<String, String> start() {
         MONGO.start();
-        return Map.of("quarkus.mongodb.connection-string", MONGO.getReplicaSetUrl("vendor_exchange"));
+        return Map.of("quarkus.mongodb.connection-string", MONGO.getReplicaSetUrl("directory_accuracy"));
     }
 
     @Override

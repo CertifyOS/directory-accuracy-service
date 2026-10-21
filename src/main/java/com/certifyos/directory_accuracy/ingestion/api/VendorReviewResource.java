@@ -5,7 +5,7 @@ import com.certifyos.directory_accuracy.audit.AuditRepository;
 import com.certifyos.directory_accuracy.auth.Permission;
 import com.certifyos.directory_accuracy.auth.RequiresPermission;
 import com.certifyos.directory_accuracy.auth.UserContext;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.api.AuditViews.EventView;
 import com.certifyos.directory_accuracy.export.api.Items;
 import com.certifyos.directory_accuracy.export.batch.BatchOperations;
@@ -93,7 +93,7 @@ public class VendorReviewResource {
     private final FieldRecommendationRepository recommendations;
     private final AuditRepository audit;
     private final BatchOperations batchOperations;
-    private final VendorExchangeConfig config;
+    private final DirectoryAccuracyConfig config;
     private final ReviewService reviews;
 
     public VendorReviewResource(
@@ -101,7 +101,7 @@ public class VendorReviewResource {
             FieldRecommendationRepository recommendations,
             AuditRepository audit,
             BatchOperations batchOperations,
-            VendorExchangeConfig config,
+            DirectoryAccuracyConfig config,
             ReviewService reviews) {
         this.ctx = ctx;
         this.recommendations = recommendations;

@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.auth;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.Problem;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -18,20 +18,20 @@ import org.mockito.Mockito;
 @SuppressWarnings("unchecked")
 class PubSubPushAuthFilterTest {
 
-    private Instance<VendorExchangeConfig> cfg;
-    private VendorExchangeConfig.PubSub pubsub;
+    private Instance<DirectoryAccuracyConfig> cfg;
+    private DirectoryAccuracyConfig.PubSub pubsub;
     private PushTokenVerifier verifier;
     private ContainerRequestContext rc;
 
     @BeforeEach
     void before() {
-        VendorExchangeConfig mapping = Mockito.mock(VendorExchangeConfig.class);
+        DirectoryAccuracyConfig mapping = Mockito.mock(DirectoryAccuracyConfig.class);
         cfg = Mockito.mock(Instance.class);
         Mockito.when(cfg.get()).thenReturn(mapping);
-        pubsub = Mockito.mock(VendorExchangeConfig.PubSub.class);
+        pubsub = Mockito.mock(DirectoryAccuracyConfig.PubSub.class);
         Mockito.when(mapping.pubsub()).thenReturn(pubsub);
         Mockito.when(pubsub.pushServiceAccount()).thenReturn(Optional.of("pubsub-push@test.iam.gserviceaccount.com"));
-        Mockito.when(pubsub.pushAudience()).thenReturn(Optional.of("https://vendor-exchange.test/internal"));
+        Mockito.when(pubsub.pushAudience()).thenReturn(Optional.of("https://directory-accuracy.test/internal"));
         verifier = Mockito.mock(PushTokenVerifier.class);
         rc = Mockito.mock(ContainerRequestContext.class);
         UriInfo uri = Mockito.mock(UriInfo.class);

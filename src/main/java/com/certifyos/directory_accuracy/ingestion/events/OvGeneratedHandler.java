@@ -1,11 +1,11 @@
 package com.certifyos.directory_accuracy.ingestion.events;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.events.PubSubPushMessage;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import com.certifyos.directory_accuracy.ingestion.release.ReadBackService;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldLevel;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Clock;
@@ -29,16 +29,16 @@ public class OvGeneratedHandler {
     private static final Logger LOG = Logger.getLogger(OvGeneratedHandler.class);
 
     private final ReadBackService readBack;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final ObjectMapper mapper;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final Clock clock;
 
     public OvGeneratedHandler(
             ReadBackService readBack,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             ObjectMapper mapper,
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             Clock clock) {
         this.readBack = readBack;
         this.metrics = metrics;

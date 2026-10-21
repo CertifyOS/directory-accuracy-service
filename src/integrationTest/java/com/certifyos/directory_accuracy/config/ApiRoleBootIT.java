@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 public class ApiRoleBootIT {
 
     @Inject
-    VendorExchangeConfig cfg;
+    DirectoryAccuracyConfig cfg;
 
     @Inject
     JobScheduler scheduler;

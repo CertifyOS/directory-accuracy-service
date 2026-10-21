@@ -2,7 +2,7 @@ package com.certifyos.directory_accuracy.clients;
 
 import com.certifyos.directory_accuracy.clients.ApiLayerAuthClient.TokenRequest;
 import com.certifyos.directory_accuracy.clients.ApiLayerAuthClient.TokenResponse;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
@@ -45,15 +45,15 @@ class ApiLayerTokenServiceTest {
         }
     }
 
-    private VendorExchangeConfig cfg;
-    private VendorExchangeConfig.ApiLayer apiLayer;
+    private DirectoryAccuracyConfig cfg;
+    private DirectoryAccuracyConfig.ApiLayer apiLayer;
     private ApiLayerAuthClient auth;
     private MutableClock clock;
 
     @BeforeEach
     void before() {
-        cfg = Mockito.mock(VendorExchangeConfig.class);
-        apiLayer = Mockito.mock(VendorExchangeConfig.ApiLayer.class);
+        cfg = Mockito.mock(DirectoryAccuracyConfig.class);
+        apiLayer = Mockito.mock(DirectoryAccuracyConfig.ApiLayer.class);
         Mockito.when(cfg.apiLayer()).thenReturn(apiLayer);
         Mockito.when(apiLayer.clientId()).thenReturn(Optional.of("client-1"));
         Mockito.when(apiLayer.clientSecret()).thenReturn(Optional.of("secret-1"));

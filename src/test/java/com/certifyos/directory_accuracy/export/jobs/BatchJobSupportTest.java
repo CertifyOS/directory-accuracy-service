@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.export.jobs;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
@@ -26,8 +26,8 @@ class BatchJobSupportTest {
             new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct")))),
             Instant.parse("2026-10-01T06:00:12Z"));
 
-    private static VendorExchangeConfig config(boolean enabled) {
-        VendorExchangeConfig cfg = Mockito.mock(VendorExchangeConfig.class);
+    private static DirectoryAccuracyConfig config(boolean enabled) {
+        DirectoryAccuracyConfig cfg = Mockito.mock(DirectoryAccuracyConfig.class);
         Mockito.when(cfg.enabled()).thenReturn(enabled);
         return cfg;
     }

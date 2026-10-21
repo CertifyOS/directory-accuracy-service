@@ -11,7 +11,7 @@ import java.util.Map;
  * A WireMock standing in for the DAL. The lifecycle manager runs in a different classloader from
  * the test class, so a static server field is not visible from the tests; the port travels through
  * a system property (shared JVM-wide) and every helper builds a fresh admin client from it. The
- * property name must not start with {@code vendor-exchange.}, which is a closed config mapping.
+ * property name must not start with {@code directory-accuracy.}, which is a closed config mapping.
  */
 public class WireMockDal implements QuarkusTestResourceLifecycleManager {
 

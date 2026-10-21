@@ -8,14 +8,14 @@ import java.util.List;
 import org.bson.Document;
 
 /**
- * The eight collections this service owns in database {@code vendor_exchange}. JobRunr owns five more
+ * The eight collections this service owns in database {@code directory_accuracy}. JobRunr owns five more
  * ({@code jobrunr_*}) in the same database and our code never names them.
  */
 @ApplicationScoped
 public class Collections {
 
     /** Database name; also the JobRunr database and the Testcontainers replica set database. */
-    public static final String DATABASE = "vendor_exchange";
+    public static final String DATABASE = "directory_accuracy";
 
     private final MongoClient client;
 

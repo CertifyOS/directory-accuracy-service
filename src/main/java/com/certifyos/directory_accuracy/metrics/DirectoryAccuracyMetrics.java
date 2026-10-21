@@ -21,7 +21,7 @@ import java.util.function.Supplier;
  * vendor_export_tick_duration_seconds}).
  */
 @ApplicationScoped
-public class VendorExchangeMetrics {
+public class DirectoryAccuracyMetrics {
 
     /** Every metric name in the design, for the endpoint test and the runbook. */
     public static final String TICK_DURATION = "vendor_export.tick.duration";
@@ -80,7 +80,7 @@ public class VendorExchangeMetrics {
     private final AtomicLong tickSchedulesDue = new AtomicLong();
     private final Map<String, AtomicLong> gaugeValues = new ConcurrentHashMap<>();
 
-    public VendorExchangeMetrics(MeterRegistry registry) {
+    public DirectoryAccuracyMetrics(MeterRegistry registry) {
         this.registry = registry;
         this.tickDuration = Timer.builder(TICK_DURATION)
                 .description("Wall time of one schedule tick")

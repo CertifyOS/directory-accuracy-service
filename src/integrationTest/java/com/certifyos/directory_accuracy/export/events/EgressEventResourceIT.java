@@ -44,8 +44,8 @@ class EgressEventResourceIT {
         String data = Base64.getEncoder().encodeToString(eventJson.getBytes(StandardCharsets.UTF_8));
         return "{\"message\":{\"data\":\"" + data
                 + "\",\"messageId\":\"m-42\",\"publishTime\":\"2026-10-01T07:12:01Z\","
-                + "\"attributes\":{\"initiator\":\"vendor-exchange-worker\"}},"
-                + "\"subscription\":\"projects/p/subscriptions/vendor-exchange-egress-events\"}";
+                + "\"attributes\":{\"initiator\":\"directory-accuracy-worker\"}},"
+                + "\"subscription\":\"projects/p/subscriptions/vendor-export-egress-events\"}";
     }
 
     static final String EVENT = "{\"schemaVersion\":\"1\",\"type\":\"EXPORT_COMPLETED\",\"tenantId\":\"org-a\","

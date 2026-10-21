@@ -1,11 +1,11 @@
 package com.certifyos.directory_accuracy.ingestion.review;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus.Action;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -56,16 +56,16 @@ public class ReviewService {
 
     private final FieldRecommendationRepository recommendations;
     private final DecisionWriter writer;
-    private final VendorExchangeMetrics metrics;
-    private final VendorExchangeConfig config;
+    private final DirectoryAccuracyMetrics metrics;
+    private final DirectoryAccuracyConfig config;
     private final ObjectMapper mapper;
     private final Clock clock;
 
     public ReviewService(
             FieldRecommendationRepository recommendations,
             DecisionWriter writer,
-            VendorExchangeMetrics metrics,
-            VendorExchangeConfig config,
+            DirectoryAccuracyMetrics metrics,
+            DirectoryAccuracyConfig config,
             ObjectMapper mapper,
             Clock clock) {
         this.recommendations = recommendations;

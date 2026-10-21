@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.auth;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.Problems;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.inject.Instance;
@@ -26,19 +26,19 @@ public class PubSubPushAuthFilter implements ContainerRequestFilter {
     private static final String BEARER = "Bearer ";
 
     // Instance, not the mapping itself: Quarkus REST instantiates @Provider filters during static
-    // init, before runtime config exists, and a direct VendorExchangeConfig parameter fails the boot
+    // init, before runtime config exists, and a direct DirectoryAccuracyConfig parameter fails the boot
     // with SRCFG00027 "Could not find a mapping". The lookup happens per request instead.
-    private final Instance<VendorExchangeConfig> cfg;
+    private final Instance<DirectoryAccuracyConfig> cfg;
     private final PushTokenVerifier verifier;
 
-    public PubSubPushAuthFilter(Instance<VendorExchangeConfig> cfg, PushTokenVerifier verifier) {
+    public PubSubPushAuthFilter(Instance<DirectoryAccuracyConfig> cfg, PushTokenVerifier verifier) {
         this.cfg = cfg;
         this.verifier = verifier;
     }
 
     @Override
     public void filter(ContainerRequestContext rc) {
-        VendorExchangeConfig.PubSub pubsub = cfg.get().pubsub();
+        DirectoryAccuracyConfig.PubSub pubsub = cfg.get().pubsub();
         if (pubsub.pushServiceAccount().isEmpty() || pubsub.pushAudience().isEmpty()) {
             Problems.abort(rc, 401, "PUSH_NOT_CONFIGURED", "push delivery is not configured on this service");
             return;

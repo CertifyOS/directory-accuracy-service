@@ -1,7 +1,7 @@
 package com.certifyos.directory_accuracy.clients;
 
 import com.certifyos.directory_accuracy.auth.GoogleIdTokenService;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.client.ClientRequestFilter;
@@ -17,9 +17,9 @@ import java.util.Optional;
 public class FileIngestionIapFilter implements ClientRequestFilter {
 
     private final GoogleIdTokenService googleTokens;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
 
-    public FileIngestionIapFilter(GoogleIdTokenService googleTokens, VendorExchangeConfig cfg) {
+    public FileIngestionIapFilter(GoogleIdTokenService googleTokens, DirectoryAccuracyConfig cfg) {
         this.googleTokens = googleTokens;
         this.cfg = cfg;
     }

@@ -4,7 +4,7 @@ import com.certifyos.directory_accuracy.auth.Permission;
 import com.certifyos.directory_accuracy.auth.PermissionFilter;
 import com.certifyos.directory_accuracy.auth.RequiresPermission;
 import com.certifyos.directory_accuracy.auth.UserContext;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.Problem;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -39,11 +39,11 @@ class VendorReleaseResourcePermissionTest {
     }
 
     private static Optional<Response> filter(String methodName, List<String> actions) {
-        VendorExchangeConfig mapping = Mockito.mock(VendorExchangeConfig.class);
-        VendorExchangeConfig.Permissions permissions = Mockito.mock(VendorExchangeConfig.Permissions.class);
+        DirectoryAccuracyConfig mapping = Mockito.mock(DirectoryAccuracyConfig.class);
+        DirectoryAccuracyConfig.Permissions permissions = Mockito.mock(DirectoryAccuracyConfig.Permissions.class);
         Mockito.when(permissions.enforce()).thenReturn(true);
         Mockito.when(mapping.permissions()).thenReturn(permissions);
-        Instance<VendorExchangeConfig> cfg = Mockito.mock(Instance.class);
+        Instance<DirectoryAccuracyConfig> cfg = Mockito.mock(Instance.class);
         Mockito.when(cfg.get()).thenReturn(mapping);
         UserContext ctx = new UserContext();
         ctx.fill("rev@certifyos.com", "org-a", Map.of("org-a", Map.of("vendor-review", actions)));

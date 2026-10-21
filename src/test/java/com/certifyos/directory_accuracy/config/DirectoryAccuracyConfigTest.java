@@ -15,32 +15,32 @@ import org.junit.jupiter.api.Test;
  * kebab-case property names each accessor maps to, defaults, and the empty-means-absent rule the
  * swap-in keys rely on.
  */
-class VendorExchangeConfigTest {
+class DirectoryAccuracyConfigTest {
 
     private static Map<String, String> required() {
         Map<String, String> values = new HashMap<>();
-        values.put("vendor-exchange.vendor-bucket", "vendor-sftp");
-        values.put("vendor-exchange.egress.url", "https://egress.example");
-        values.put("vendor-exchange.egress.iap-client-id", "egress-client");
-        values.put("vendor-exchange.dal.url", "https://dal.example");
-        values.put("vendor-exchange.dal.iap-client-id", "dal-client");
-        values.put("vendor-exchange.api-layer.url", "https://api.example");
-        values.put("vendor-exchange.ingestion.archive-bucket", "archive-bucket");
-        values.put("vendor-exchange.file-ingestion.url", "https://file-ingestion.example");
+        values.put("directory-accuracy.vendor-bucket", "vendor-sftp");
+        values.put("directory-accuracy.egress.url", "https://egress.example");
+        values.put("directory-accuracy.egress.iap-client-id", "egress-client");
+        values.put("directory-accuracy.dal.url", "https://dal.example");
+        values.put("directory-accuracy.dal.iap-client-id", "dal-client");
+        values.put("directory-accuracy.api-layer.url", "https://api.example");
+        values.put("directory-accuracy.ingestion.archive-bucket", "archive-bucket");
+        values.put("directory-accuracy.file-ingestion.url", "https://file-ingestion.example");
         return values;
     }
 
-    private static VendorExchangeConfig load(Map<String, String> values) {
+    private static DirectoryAccuracyConfig load(Map<String, String> values) {
         SmallRyeConfig config = new SmallRyeConfigBuilder()
-                .withMapping(VendorExchangeConfig.class)
+                .withMapping(DirectoryAccuracyConfig.class)
                 .withSources(new PropertiesConfigSource(values, "test", 100))
                 .build();
-        return config.getConfigMapping(VendorExchangeConfig.class);
+        return config.getConfigMapping(DirectoryAccuracyConfig.class);
     }
 
     @Test
     void requiredKeysLoadAndDefaultsApply() {
-        VendorExchangeConfig cfg = load(required());
+        DirectoryAccuracyConfig cfg = load(required());
 
         Assertions.assertTrue(cfg.enabled());
         Assertions.assertEquals(8, cfg.jobRetries());
@@ -61,9 +61,9 @@ class VendorExchangeConfigTest {
     @Test
     void optionalKeysAreAbsentWhenUnsetOrEmpty() {
         Map<String, String> values = required();
-        values.put("vendor-exchange.api-layer.client-id", "");
-        values.put("vendor-exchange.pubsub.push-audience", "");
-        VendorExchangeConfig cfg = load(values);
+        values.put("directory-accuracy.api-layer.client-id", "");
+        values.put("directory-accuracy.pubsub.push-audience", "");
+        DirectoryAccuracyConfig cfg = load(values);
 
         Assertions.assertTrue(cfg.apiLayer().clientId().isEmpty(), "empty string must read as absent");
         Assertions.assertTrue(cfg.apiLayer().clientSecret().isEmpty(), "unset must read as absent");
@@ -74,13 +74,16 @@ class VendorExchangeConfigTest {
     @Test
     void optionalKeysArePresentWhenSet() {
         Map<String, String> values = required();
-        values.put("vendor-exchange.api-layer.client-id", "svc-vendor-exchange");
-        values.put("vendor-exchange.api-layer.client-secret", "s3cret");
-        values.put("vendor-exchange.pubsub.push-service-account", "pubsub-push@p.iam.gserviceaccount.com");
-        values.put("vendor-exchange.pubsub.push-audience", "https://vendor-exchange.internal.certifyos.com/internal/x");
-        VendorExchangeConfig cfg = load(values);
+        values.put("directory-accuracy.api-layer.client-id", "svc-directory-accuracy");
+        values.put("directory-accuracy.api-layer.client-secret", "s3cret");
+        values.put("directory-accuracy.pubsub.push-service-account", "pubsub-push@p.iam.gserviceaccount.com");
+        values.put(
+                "directory-accuracy.pubsub.push-audience",
+                "https://directory-accuracy.internal.certifyos.com/internal/x");
+        DirectoryAccuracyConfig cfg = load(values);
 
-        Assertions.assertEquals("svc-vendor-exchange", cfg.apiLayer().clientId().orElseThrow());
+        Assertions.assertEquals(
+                "svc-directory-accuracy", cfg.apiLayer().clientId().orElseThrow());
         Assertions.assertEquals("s3cret", cfg.apiLayer().clientSecret().orElseThrow());
         Assertions.assertEquals(
                 "pubsub-push@p.iam.gserviceaccount.com",
@@ -91,11 +94,11 @@ class VendorExchangeConfigTest {
     @Test
     void overridesReplaceDefaults() {
         Map<String, String> values = required();
-        values.put("vendor-exchange.enabled", "false");
-        values.put("vendor-exchange.job-retries", "3");
-        values.put("vendor-exchange.egress.deadline-hours", "2");
-        values.put("vendor-exchange.permissions.enforce", "true");
-        VendorExchangeConfig cfg = load(values);
+        values.put("directory-accuracy.enabled", "false");
+        values.put("directory-accuracy.job-retries", "3");
+        values.put("directory-accuracy.egress.deadline-hours", "2");
+        values.put("directory-accuracy.permissions.enforce", "true");
+        DirectoryAccuracyConfig cfg = load(values);
 
         Assertions.assertFalse(cfg.enabled());
         Assertions.assertEquals(3, cfg.jobRetries());
@@ -117,14 +120,14 @@ class VendorExchangeConfigTest {
     @Test
     void unknownKeyUnderThePrefixIsRefused() {
         Map<String, String> values = required();
-        values.put("vendor-exchange.role", "api");
+        values.put("directory-accuracy.role", "api");
 
         Assertions.assertThrows(ConfigValidationException.class, () -> load(values));
     }
 
     @Test
     void ingestionDefaultsMatchTheDesign() {
-        VendorExchangeConfig cfg = load(required());
+        DirectoryAccuracyConfig cfg = load(required());
 
         Assertions.assertEquals("archive-bucket", cfg.ingestion().archiveBucket());
         Assertions.assertEquals(6, cfg.ingestion().ingestionDeadlineHours());
@@ -145,31 +148,31 @@ class VendorExchangeConfigTest {
     @Test
     void archiveBucketIsRequired() {
         Map<String, String> values = required();
-        values.remove("vendor-exchange.ingestion.archive-bucket");
+        values.remove("directory-accuracy.ingestion.archive-bucket");
 
         ConfigValidationException refused =
                 Assertions.assertThrows(ConfigValidationException.class, () -> load(values));
 
-        Assertions.assertTrue(refused.getMessage().contains("vendor-exchange.ingestion.archive-bucket"));
+        Assertions.assertTrue(refused.getMessage().contains("directory-accuracy.ingestion.archive-bucket"));
     }
 
     @Test
     void fileIngestionUrlIsRequired() {
         Map<String, String> values = required();
-        values.remove("vendor-exchange.file-ingestion.url");
+        values.remove("directory-accuracy.file-ingestion.url");
 
         ConfigValidationException refused =
                 Assertions.assertThrows(ConfigValidationException.class, () -> load(values));
 
-        Assertions.assertTrue(refused.getMessage().contains("vendor-exchange.file-ingestion.url"));
+        Assertions.assertTrue(refused.getMessage().contains("directory-accuracy.file-ingestion.url"));
     }
 
     @Test
     void fileIngestionSwapInKeysAreAbsentWhenEmpty() {
         Map<String, String> values = required();
-        values.put("vendor-exchange.file-ingestion.mapping-id", "");
-        values.put("vendor-exchange.file-ingestion.iap-audience", "");
-        VendorExchangeConfig cfg = load(values);
+        values.put("directory-accuracy.file-ingestion.mapping-id", "");
+        values.put("directory-accuracy.file-ingestion.iap-audience", "");
+        DirectoryAccuracyConfig cfg = load(values);
 
         Assertions.assertTrue(cfg.fileIngestion().mappingId().isEmpty(), "empty string must read as absent");
         Assertions.assertTrue(cfg.fileIngestion().iapAudience().isEmpty(), "empty string must read as absent");
@@ -178,9 +181,9 @@ class VendorExchangeConfigTest {
     @Test
     void fileIngestionSwapInKeysAreReadWhenSet() {
         Map<String, String> values = required();
-        values.put("vendor-exchange.file-ingestion.mapping-id", "map-1");
-        values.put("vendor-exchange.file-ingestion.iap-audience", "/projects/1/global/backendServices/3");
-        VendorExchangeConfig cfg = load(values);
+        values.put("directory-accuracy.file-ingestion.mapping-id", "map-1");
+        values.put("directory-accuracy.file-ingestion.iap-audience", "/projects/1/global/backendServices/3");
+        DirectoryAccuracyConfig cfg = load(values);
 
         Assertions.assertEquals("map-1", cfg.fileIngestion().mappingId().orElseThrow());
         Assertions.assertEquals(

@@ -1,10 +1,10 @@
 package com.certifyos.directory_accuracy.ingestion.jobs;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Optional;
 import java.util.Set;
@@ -23,11 +23,12 @@ public class InboundJobSupport {
 
     private static final Logger LOG = Logger.getLogger(InboundJobSupport.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final InboundFileRepository inbound;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
 
-    public InboundJobSupport(VendorExchangeConfig cfg, InboundFileRepository inbound, VendorExchangeMetrics metrics) {
+    public InboundJobSupport(
+            DirectoryAccuracyConfig cfg, InboundFileRepository inbound, DirectoryAccuracyMetrics metrics) {
         this.cfg = cfg;
         this.inbound = inbound;
         this.metrics = metrics;
@@ -110,12 +111,12 @@ public class InboundJobSupport {
     }
 
     /** The service configuration, for the settings a job body reads. */
-    public VendorExchangeConfig config() {
+    public DirectoryAccuracyConfig config() {
         return cfg;
     }
 
     /** The service metrics, for the counters and timers a job body records. */
-    public VendorExchangeMetrics metrics() {
+    public DirectoryAccuracyMetrics metrics() {
         return metrics;
     }
 

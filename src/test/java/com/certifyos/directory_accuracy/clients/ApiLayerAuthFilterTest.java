@@ -1,7 +1,7 @@
 package com.certifyos.directory_accuracy.clients;
 
 import com.certifyos.directory_accuracy.auth.GoogleIdTokenService;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedHashMap;
@@ -18,8 +18,8 @@ class ApiLayerAuthFilterTest {
 
     private ApiLayerTokenService tokens;
     private GoogleIdTokenService google;
-    private VendorExchangeConfig.ApiLayer apiLayer;
-    private VendorExchangeConfig cfg;
+    private DirectoryAccuracyConfig.ApiLayer apiLayer;
+    private DirectoryAccuracyConfig cfg;
     private MultivaluedMap<String, Object> headers;
     private ClientRequestContext request;
 
@@ -27,8 +27,8 @@ class ApiLayerAuthFilterTest {
     void before() {
         tokens = Mockito.mock(ApiLayerTokenService.class);
         google = Mockito.mock(GoogleIdTokenService.class);
-        cfg = Mockito.mock(VendorExchangeConfig.class);
-        apiLayer = Mockito.mock(VendorExchangeConfig.ApiLayer.class);
+        cfg = Mockito.mock(DirectoryAccuracyConfig.class);
+        apiLayer = Mockito.mock(DirectoryAccuracyConfig.ApiLayer.class);
         Mockito.when(cfg.apiLayer()).thenReturn(apiLayer);
         Mockito.when(tokens.accessToken()).thenReturn("auth0-token");
         Mockito.when(google.idToken("/projects/1/global/backendServices/2")).thenReturn("iap-token");

@@ -6,7 +6,7 @@ import com.certifyos.directory_accuracy.audit.AuditRepository;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -50,14 +50,14 @@ public class BatchFinalFailureFilter implements ApplyStateFilter {
     private final ExportBatchRepository batches;
     private final AuditRepository audit;
     private final Transactions transactions;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final Clock clock;
 
     public BatchFinalFailureFilter(
             ExportBatchRepository batches,
             AuditRepository audit,
             Transactions transactions,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             Clock clock) {
         this.batches = batches;
         this.audit = audit;

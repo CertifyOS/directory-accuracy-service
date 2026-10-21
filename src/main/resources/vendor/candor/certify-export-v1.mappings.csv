@@ -1,6 +1,6 @@
 output_column,attribute_path,json_extraction_path,multi_value_handling,max_columns,column_order,entity_group,default_value
-schema_version,egressTenantId,_vendor_exchange.constant,,,1,,certify-export-v1
-entity_type,egressTenantId,_vendor_exchange.constant,,,2,,practitioner
+schema_version,egressTenantId,_directory_accuracy.constant,,,1,,certify-export-v1
+entity_type,egressTenantId,_directory_accuracy.constant,,,2,,practitioner
 export_batch_id,egressTenantId,_export_batch_id,,,3,,
 export_generated_at,egressTenantId,_generated_at,,,4,,
 tenant_id,egressTenantId,tenant_id,,,5,,
@@ -14,15 +14,15 @@ name_suffix,suffix,suffix,,,12,,
 group_affiliation,groupName,groupMemberships[].tenantGroup.group.data.name,,,13,,
 certify_location_id,locationId,groupMemberships[].groupPractitionerLocations[].groupLocation.locationId,,,14,,
 location_name,groupPracticeLocationName,groupMemberships[].groupPractitionerLocations[].groupLocation.location.data.name,,,15,,
-address_type,egressTenantId,_vendor_exchange.constant,,,16,,service
+address_type,egressTenantId,_directory_accuracy.constant,,,16,,service
 address_line1,groupPracticeLocationAddressLine1,groupMemberships[].groupPractitionerLocations[].groupLocation.location.locationEntityAddresses[data.addressType=service].address.data.addressLine1,,,17,,
 address_line2,groupPracticeLocationAddressLine2,groupMemberships[].groupPractitionerLocations[].groupLocation.location.locationEntityAddresses[data.addressType=service].address.data.addressLine2,,,18,,
 city,groupPracticeLocationCity,groupMemberships[].groupPractitionerLocations[].groupLocation.location.locationEntityAddresses[data.addressType=service].address.data.city,,,19,,
 state,groupPracticeLocationState,groupMemberships[].groupPractitionerLocations[].groupLocation.location.locationEntityAddresses[data.addressType=service].address.data.state,,,20,,
 zip,groupPracticeLocationZip,groupMemberships[].groupPractitionerLocations[].groupLocation.location.locationEntityAddresses[data.addressType=service].address.data.zip,,,21,,
 location_phone,groupPracticeLocationPhone,groupMemberships[].groupPractitionerLocations[].data.phone,,,22,,
-practitioner_phone,groupPracticeLocationAppointmentPhone,_vendor_exchange.open.practitioner_phone,,,23,,
-telehealth_url,telemedicineURL,_vendor_exchange.open.telehealth_url,,,24,,
+practitioner_phone,groupPracticeLocationAppointmentPhone,_directory_accuracy.open.practitioner_phone,,,23,,
+telehealth_url,telemedicineURL,_directory_accuracy.open.telehealth_url,,,24,,
 website,groupPracticeLocationWebsite,groupMemberships[].groupPractitionerLocations[].groupLocation.location.data.groupPracticeLocationWebsite,,,25,,
 specialty,practitionerSpecialtyName,tenantPractitionerSpecialties[data.status=active].tenantSpecialty.displayName,comma_separated,,26,,
 languages,practitionerLanguage,languages[].language,comma_separated,,27,,

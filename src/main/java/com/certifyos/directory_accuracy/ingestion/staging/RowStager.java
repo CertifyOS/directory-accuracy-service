@@ -2,7 +2,7 @@ package com.certifyos.directory_accuracy.ingestion.staging;
 
 import com.certifyos.directory_accuracy.clients.FileIngestionRow;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Clock;
@@ -41,14 +41,14 @@ public class RowStager {
     private final FieldRecommendationRepository recommendations;
     private final StagingLifecycle lifecycle;
     private final ObjectMapper mapper;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final Clock clock;
 
     public RowStager(
             FieldRecommendationRepository recommendations,
             StagingLifecycle lifecycle,
             ObjectMapper mapper,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             Clock clock) {
         this.recommendations = recommendations;
         this.lifecycle = lifecycle;

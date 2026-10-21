@@ -3,7 +3,7 @@ package com.certifyos.directory_accuracy.export;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import io.micrometer.core.instrument.Tags;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,12 +28,15 @@ public class ExportStateGauges {
 
     private final ExportBatchRepository batches;
     private final ScheduleRepository schedules;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final Clock clock;
     private volatile Snapshot snapshot = new Snapshot(Instant.MIN, Map.of(), Map.of());
 
     public ExportStateGauges(
-            ExportBatchRepository batches, ScheduleRepository schedules, VendorExchangeMetrics metrics, Clock clock) {
+            ExportBatchRepository batches,
+            ScheduleRepository schedules,
+            DirectoryAccuracyMetrics metrics,
+            Clock clock) {
         this.batches = batches;
         this.schedules = schedules;
         this.metrics = metrics;
@@ -43,12 +46,12 @@ public class ExportStateGauges {
     void register(@Observes StartupEvent event) {
         for (BatchState state : BatchState.values()) {
             metrics.registerGauge(
-                    VendorExchangeMetrics.BATCHES_BY_STATE, Tags.of("state", state.name()), () -> batchesIn(state));
+                    DirectoryAccuracyMetrics.BATCHES_BY_STATE, Tags.of("state", state.name()), () -> batchesIn(state));
         }
         metrics.registerGauge(
-                VendorExchangeMetrics.SCHEDULES_BY_STATE, Tags.of("state", "ENABLED"), () -> schedules(true));
+                DirectoryAccuracyMetrics.SCHEDULES_BY_STATE, Tags.of("state", "ENABLED"), () -> schedules(true));
         metrics.registerGauge(
-                VendorExchangeMetrics.SCHEDULES_BY_STATE, Tags.of("state", "DISABLED"), () -> schedules(false));
+                DirectoryAccuracyMetrics.SCHEDULES_BY_STATE, Tags.of("state", "DISABLED"), () -> schedules(false));
     }
 
     long batchesIn(BatchState state) {

@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.ingestion.events;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
@@ -55,7 +55,7 @@ public class ArrivalHandler {
     private final InboundLifecycle lifecycle;
     private final UnmatchedOperations unmatched;
     private final IngestionRequests requests;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final Clock clock;
 
     public ArrivalHandler(
@@ -63,11 +63,11 @@ public class ArrivalHandler {
             InboundLifecycle lifecycle,
             UnmatchedOperations unmatched,
             IngestionRequests requests,
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             Clock clock) {
         String signal = cfg.ingestion().completenessSignal();
         if (!DATA_FILE.equals(signal)) {
-            throw new IllegalStateException("vendor-exchange.ingestion.completeness-signal is " + signal + "; only "
+            throw new IllegalStateException("directory-accuracy.ingestion.completeness-signal is " + signal + "; only "
                     + DATA_FILE + " is implemented");
         }
         this.batches = batches;

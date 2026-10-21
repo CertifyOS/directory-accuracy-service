@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.auth;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.google.api.client.json.webtoken.JsonWebSignature;
 import com.google.auth.oauth2.TokenVerifier;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -22,7 +22,7 @@ public class GooglePushTokenVerifier implements PushTokenVerifier {
     private final String expectedEmail;
 
     @Inject
-    public GooglePushTokenVerifier(VendorExchangeConfig cfg) {
+    public GooglePushTokenVerifier(DirectoryAccuracyConfig cfg) {
         this(
                 TokenVerifier.newBuilder()
                         .setIssuer(ISSUER)

@@ -17,7 +17,7 @@ import org.jboss.logging.Logger;
  * The ranking guardrail (design D20, plan P8): a tenant whose survivorship configuration does not rank
  * candor cannot release, because an unranked source falls to rank 997 and never wins. Reads the
  * tenant's configurations from the DAL page by page. The answer, either way, is cached per tenant for
- * {@code vendor-exchange.auth.cache-ttl}; a failed read is not cached.
+ * {@code directory-accuracy.auth.cache-ttl}; a failed read is not cached.
  *
  * <p>Provisional until Gate 7 reads a live configuration: a ranking rule is any object with {@code
  * type = sourceRanking} (survivorship's {@code SurvivorshipTenantConfig.getSourceRankingRule}), and

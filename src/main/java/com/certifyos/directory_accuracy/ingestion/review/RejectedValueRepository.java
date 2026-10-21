@@ -109,7 +109,7 @@ public class RejectedValueRepository {
     static Instant expiry(Instant now, int ttlMonths) {
         if (ttlMonths < 1) {
             throw new IllegalArgumentException(
-                    "vendor-exchange.ingestion.rejected-value-ttl-months must be at least 1, got " + ttlMonths);
+                    "directory-accuracy.ingestion.rejected-value-ttl-months must be at least 1, got " + ttlMonths);
         }
         return now.atZone(ZoneOffset.UTC).plusMonths(ttlMonths).toInstant();
     }

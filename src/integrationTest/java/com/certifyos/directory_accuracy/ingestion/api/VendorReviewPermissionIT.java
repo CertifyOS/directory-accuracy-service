@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 /**
- * The review endpoints with {@code vendor-exchange.permissions.enforce} on: a caller holding only
+ * The review endpoints with {@code directory-accuracy.permissions.enforce} on: a caller holding only
  * {@code vendor-review: [read]} reads but cannot decide. Its own profile, so Quarkus restarts once for
  * this class; a nested class cannot carry a second profile.
  */
@@ -53,7 +53,7 @@ class VendorReviewPermissionIT {
         @Override
         public Map<String, String> getConfigOverrides() {
             Map<String, String> overrides = new HashMap<>(super.getConfigOverrides());
-            overrides.put("vendor-exchange.permissions.enforce", "true");
+            overrides.put("directory-accuracy.permissions.enforce", "true");
             return overrides;
         }
     }

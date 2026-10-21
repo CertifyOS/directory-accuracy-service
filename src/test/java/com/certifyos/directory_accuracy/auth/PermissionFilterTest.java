@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.auth;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.Problem;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -31,17 +31,17 @@ class PermissionFilterTest {
         void open() {}
     }
 
-    private Instance<VendorExchangeConfig> cfg;
-    private VendorExchangeConfig.Permissions permissions;
+    private Instance<DirectoryAccuracyConfig> cfg;
+    private DirectoryAccuracyConfig.Permissions permissions;
     private UserContext ctx;
     private ContainerRequestContext rc;
 
     @BeforeEach
     void before() {
-        VendorExchangeConfig mapping = Mockito.mock(VendorExchangeConfig.class);
+        DirectoryAccuracyConfig mapping = Mockito.mock(DirectoryAccuracyConfig.class);
         cfg = Mockito.mock(Instance.class);
         Mockito.when(cfg.get()).thenReturn(mapping);
-        permissions = Mockito.mock(VendorExchangeConfig.Permissions.class);
+        permissions = Mockito.mock(DirectoryAccuracyConfig.Permissions.class);
         Mockito.when(mapping.permissions()).thenReturn(permissions);
         ctx = new UserContext();
         rc = Mockito.mock(ContainerRequestContext.class);

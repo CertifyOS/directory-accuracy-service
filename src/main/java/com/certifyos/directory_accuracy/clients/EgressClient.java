@@ -29,7 +29,7 @@ public interface EgressClient {
     String TENANT_HEADER = "X-Forwarding-Tenant-Id";
 
     /** The identity egress records as the initiator; also the Pub/Sub attribute our subscription filters on. */
-    String INITIATOR = "vendor-exchange-worker";
+    String INITIATOR = "directory-accuracy-worker";
 
     /**
      * Asks egress to build and place a file.

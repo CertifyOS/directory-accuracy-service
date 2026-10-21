@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 /** Tokens signed here with a throwaway RSA key; the verifier is given the matching public key. */
 class GooglePushTokenVerifierTest {
 
-    static final String AUDIENCE = "https://vendor-exchange.test/internal/vendor-exports/egress-events";
+    static final String AUDIENCE = "https://directory-accuracy.test/internal/vendor-exports/egress-events";
     static final String ACCOUNT = "pubsub-push@test.iam.gserviceaccount.com";
 
     private static KeyPair keys;

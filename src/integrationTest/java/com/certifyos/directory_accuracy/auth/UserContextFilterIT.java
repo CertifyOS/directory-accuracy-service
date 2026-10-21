@@ -133,7 +133,7 @@ class UserContextFilterIT {
                         .withQueryParam("email", WireMock.equalTo("hdr@certifyos.com"))
                         .withQueryParam("includePermissions", WireMock.equalTo("true"))
                         .withHeader("Authorization", WireMock.equalTo("Bearer dal-id-token"))
-                        .withHeader("requesting-user-id", WireMock.equalTo("vendor-exchange-service"))
+                        .withHeader("requesting-user-id", WireMock.equalTo("directory-accuracy-service"))
                         .withHeader("requesting-organization-id", WireMock.equalTo("org-h")));
     }
 

@@ -1,7 +1,7 @@
 package com.certifyos.directory_accuracy.clients;
 
 import com.certifyos.directory_accuracy.auth.GoogleIdTokenService;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.client.ClientRequestFilter;
@@ -23,9 +23,9 @@ public class ApiLayerIapFilter implements ClientRequestFilter {
     public static final String PROXY_AUTHORIZATION = "Proxy-Authorization";
 
     private final GoogleIdTokenService googleTokens;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
 
-    public ApiLayerIapFilter(GoogleIdTokenService googleTokens, VendorExchangeConfig cfg) {
+    public ApiLayerIapFilter(GoogleIdTokenService googleTokens, DirectoryAccuracyConfig cfg) {
         this.googleTokens = googleTokens;
         this.cfg = cfg;
     }

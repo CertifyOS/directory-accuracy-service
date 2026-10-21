@@ -2,7 +2,7 @@ package com.certifyos.directory_accuracy.clients;
 
 import com.certifyos.directory_accuracy.clients.ApiLayerAuthClient.TokenRequest;
 import com.certifyos.directory_accuracy.clients.ApiLayerAuthClient.TokenResponse;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.ProcessingException;
 import jakarta.ws.rs.WebApplicationException;
@@ -25,12 +25,12 @@ public class ApiLayerTokenService {
     static final Duration EXPIRY_MARGIN = Duration.ofSeconds(60);
     private static final Logger LOG = Logger.getLogger(ApiLayerTokenService.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final ApiLayerAuthClient auth;
     private final Clock clock;
     private volatile Cached cached;
 
-    public ApiLayerTokenService(VendorExchangeConfig cfg, @RestClient ApiLayerAuthClient auth, Clock clock) {
+    public ApiLayerTokenService(DirectoryAccuracyConfig cfg, @RestClient ApiLayerAuthClient auth, Clock clock) {
         this.cfg = cfg;
         this.auth = auth;
         this.clock = clock;

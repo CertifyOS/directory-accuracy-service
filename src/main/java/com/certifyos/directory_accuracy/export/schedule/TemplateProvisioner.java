@@ -29,7 +29,7 @@ public class TemplateProvisioner {
     public static final String SCHEMA_VERSION = "certify-export-v1";
 
     /** The template name this service assigns; the list search matches on it. */
-    public static final String TEMPLATE_NAME = "vendor-exchange candor certify-export-v1";
+    public static final String TEMPLATE_NAME = "directory-accuracy candor certify-export-v1";
 
     static final String MAPPINGS_RESOURCE = "/vendor/candor/certify-export-v1.mappings.csv";
     static final String ENTITY_TYPE = "practitioner";
@@ -114,7 +114,7 @@ public class TemplateProvisioner {
                 tenantId,
                 mappingsCsv(),
                 TEMPLATE_NAME,
-                "Directory accuracy vendor export, certify-export-v1, provisioned by vendor-exchange-service",
+                "Directory accuracy vendor export, certify-export-v1, provisioned by directory-accuracy-service",
                 ENTITY_TYPE,
                 "csv",
                 ",",

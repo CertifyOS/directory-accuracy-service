@@ -4,12 +4,12 @@ import com.certifyos.directory_accuracy.audit.Actors;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchLifecycle;
 import com.certifyos.directory_accuracy.export.batch.StaleScheduleException;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Clock;
 import java.time.Duration;
@@ -48,19 +48,19 @@ public class TickJob {
 
     private static final Logger LOG = Logger.getLogger(TickJob.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final ScheduleRepository schedules;
     private final BatchLifecycle lifecycle;
     private final AuditRepository audit;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final Clock clock;
 
     public TickJob(
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             ScheduleRepository schedules,
             BatchLifecycle lifecycle,
             AuditRepository audit,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             Clock clock) {
         this.metrics = metrics;
         this.cfg = cfg;

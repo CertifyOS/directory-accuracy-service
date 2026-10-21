@@ -27,7 +27,7 @@ import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus;
 import com.certifyos.directory_accuracy.ingestion.staging.RowDisposition;
 import com.certifyos.directory_accuracy.ingestion.staging.RowStager;
 import com.certifyos.directory_accuracy.ingestion.staging.StagingLifecycle;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -303,7 +303,7 @@ class StageRowsJobIT {
         stubComplete(ingestionId(tenant), 200);
         int eventsBefore = trail(seeded).size();
         double stagedRowsBefore =
-                counter(VendorExchangeMetrics.INGESTION_STAGE_ROWS, "tenant", tenant, "disposition", "STAGED");
+                counter(DirectoryAccuracyMetrics.INGESTION_STAGE_ROWS, "tenant", tenant, "disposition", "STAGED");
 
         run(seeded);
 
@@ -356,7 +356,7 @@ class StageRowsJobIT {
         verifyCompleted(ingestionId(tenant), 1);
         Assertions.assertEquals(
                 5.0,
-                counter(VendorExchangeMetrics.INGESTION_STAGE_ROWS, "tenant", tenant, "disposition", "STAGED")
+                counter(DirectoryAccuracyMetrics.INGESTION_STAGE_ROWS, "tenant", tenant, "disposition", "STAGED")
                         - stagedRowsBefore);
     }
 
@@ -619,12 +619,12 @@ class StageRowsJobIT {
         String tenant = "stage-busy";
         Seeded seeded = seed(tenant, InboundFileState.PARSED, 5);
         stubRowsStatus(ingestionId(tenant), 429);
-        double before = counter(VendorExchangeMetrics.INGESTION_STAGE_STREAM_429);
+        double before = counter(DirectoryAccuracyMetrics.INGESTION_STAGE_STREAM_429);
 
         WebApplicationException refused = Assertions.assertThrows(WebApplicationException.class, () -> run(seeded));
 
         Assertions.assertEquals(429, refused.getResponse().getStatus());
-        Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_STAGE_STREAM_429) - before);
+        Assertions.assertEquals(1.0, counter(DirectoryAccuracyMetrics.INGESTION_STAGE_STREAM_429) - before);
         InboundFile after = entry(seeded);
         Assertions.assertEquals(InboundFileState.STAGING, after.state(), "left for the JobRunr retry");
         Assertions.assertNull(after.failureReason());

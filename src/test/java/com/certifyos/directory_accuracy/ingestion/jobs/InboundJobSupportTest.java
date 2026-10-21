@@ -1,11 +1,11 @@
 package com.certifyos.directory_accuracy.ingestion.jobs;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.Set;
@@ -23,9 +23,9 @@ class InboundJobSupportTest {
     static final Set<InboundFileState> EXPECTED = EnumSet.of(InboundFileState.RECEIVED, InboundFileState.ARCHIVING);
 
     private static InboundJobSupport support(InboundFileRepository inbound) {
-        VendorExchangeConfig cfg = Mockito.mock(VendorExchangeConfig.class);
+        DirectoryAccuracyConfig cfg = Mockito.mock(DirectoryAccuracyConfig.class);
         Mockito.when(cfg.enabled()).thenReturn(true);
-        return new InboundJobSupport(cfg, inbound, Mockito.mock(VendorExchangeMetrics.class));
+        return new InboundJobSupport(cfg, inbound, Mockito.mock(DirectoryAccuracyMetrics.class));
     }
 
     private static Located in(InboundFileState state) {

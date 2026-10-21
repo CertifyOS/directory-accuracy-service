@@ -17,7 +17,7 @@ public record Problem(String type, String title, int status, String detail, Stri
     /** The media type of every error body. */
     public static final String MEDIA_TYPE = "application/problem+json";
 
-    static final String TYPE_PREFIX = "urn:certifyos:vendor-exchange:problem:";
+    static final String TYPE_PREFIX = "urn:certifyos:directory-accuracy:problem:";
 
     public Problem {
         Objects.requireNonNull(type, "type");

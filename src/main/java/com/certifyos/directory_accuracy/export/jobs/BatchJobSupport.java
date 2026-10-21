@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.export.jobs;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
@@ -19,10 +19,10 @@ public class BatchJobSupport {
 
     private static final Logger LOG = Logger.getLogger(BatchJobSupport.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final ExportBatchRepository batches;
 
-    public BatchJobSupport(VendorExchangeConfig cfg, ExportBatchRepository batches) {
+    public BatchJobSupport(DirectoryAccuracyConfig cfg, ExportBatchRepository batches) {
         this.cfg = cfg;
         this.batches = batches;
     }
@@ -58,7 +58,7 @@ public class BatchJobSupport {
     }
 
     /** The service configuration, for the settings a job body reads. */
-    public VendorExchangeConfig config() {
+    public DirectoryAccuracyConfig config() {
         return cfg;
     }
 

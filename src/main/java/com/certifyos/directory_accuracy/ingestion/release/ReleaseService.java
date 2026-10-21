@@ -3,7 +3,7 @@ package com.certifyos.directory_accuracy.ingestion.release;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import com.certifyos.directory_accuracy.ingestion.jobs.IngestionJobEnqueuer;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
@@ -69,7 +69,7 @@ public class ReleaseService {
     private final Transactions transactions;
     private final IngestionJobEnqueuer enqueuer;
     private final RankingGuard ranking;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final Clock clock;
 
     public ReleaseService(
@@ -78,7 +78,7 @@ public class ReleaseService {
             Transactions transactions,
             IngestionJobEnqueuer enqueuer,
             RankingGuard ranking,
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             Clock clock) {
         this.releaseFields = releaseFields;
         this.audit = audit;

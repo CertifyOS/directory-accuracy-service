@@ -82,7 +82,7 @@ class VendorExportsResourceIT {
                 .statusCode(404)
                 .contentType(Problem.MEDIA_TYPE)
                 .body("code", Matchers.equalTo("NOT_FOUND"))
-                .body("type", Matchers.equalTo("urn:certifyos:vendor-exchange:problem:not-found"));
+                .body("type", Matchers.equalTo("urn:certifyos:directory-accuracy:problem:not-found"));
     }
 
     @Test
@@ -102,7 +102,7 @@ class VendorExportsResourceIT {
                 .get("/q/openapi?format=json")
                 .then()
                 .statusCode(200)
-                .body("info.title", Matchers.equalTo("vendor-exchange-service"))
+                .body("info.title", Matchers.equalTo("directory-accuracy-service"))
                 .body("paths", Matchers.hasKey("/v1/vendor-exports"))
                 .body("paths", Matchers.hasKey("/v1/vendor-exports/schedules"))
                 .body("paths", Matchers.hasKey("/v1/vendor-exports/tick"))

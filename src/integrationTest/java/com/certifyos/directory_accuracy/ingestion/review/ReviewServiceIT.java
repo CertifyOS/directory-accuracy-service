@@ -13,7 +13,7 @@ import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus;
 import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus.Action;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -487,7 +487,7 @@ class ReviewServiceIT {
     }
 
     double decisions(String action) {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_REVIEW_DECISIONS)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_REVIEW_DECISIONS)
                 .tag("tenant", TENANT)
                 .tag("action", action)
                 .counter();
@@ -495,7 +495,7 @@ class ReviewServiceIT {
     }
 
     double conflicts() {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_REVIEW_CONFLICTS_409)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_REVIEW_CONFLICTS_409)
                 .tag("tenant", TENANT)
                 .counter();
         return found == null ? 0 : found.count();

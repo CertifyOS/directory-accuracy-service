@@ -3,7 +3,7 @@ package com.certifyos.directory_accuracy.ingestion.review;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus;
@@ -30,14 +30,14 @@ public class DecisionWriter {
     private final FieldRecommendationRepository recommendations;
     private final AuditRepository audit;
     private final RejectedValueRepository rejectedValues;
-    private final VendorExchangeConfig config;
+    private final DirectoryAccuracyConfig config;
 
     public DecisionWriter(
             Transactions transactions,
             FieldRecommendationRepository recommendations,
             AuditRepository audit,
             RejectedValueRepository rejectedValues,
-            VendorExchangeConfig config) {
+            DirectoryAccuracyConfig config) {
         this.transactions = transactions;
         this.recommendations = recommendations;
         this.audit = audit;

@@ -57,7 +57,7 @@ class MappingsCsvTest {
     @Test
     void constantsUseTheNonResolvingPathSoEgressFallsBackToTheDefault() {
         for (String[] row : rows()) {
-            if ("_vendor_exchange.constant".equals(row[2])) {
+            if ("_directory_accuracy.constant".equals(row[2])) {
                 Assertions.assertFalse(row[7].isBlank(), row[0] + " is a constant and needs a default_value");
             }
         }

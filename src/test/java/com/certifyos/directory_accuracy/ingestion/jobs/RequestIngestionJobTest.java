@@ -2,7 +2,7 @@ package com.certifyos.directory_accuracy.ingestion.jobs;
 
 import com.certifyos.directory_accuracy.clients.ArchiveStore;
 import com.certifyos.directory_accuracy.clients.FileIngestionClient;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
 import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
@@ -11,7 +11,7 @@ import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundLifecycle;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.YearMonth;
@@ -67,13 +67,13 @@ class RequestIngestionJobTest {
 
     @Test
     void unsetMappingIdFailsTheEntryWithoutCallingFileIngestion() {
-        VendorExchangeConfig cfg = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
+        DirectoryAccuracyConfig cfg = Mockito.mock(DirectoryAccuracyConfig.class, Answers.RETURNS_DEEP_STUBS);
         Mockito.when(cfg.ingestion().archiveBucket()).thenReturn("test-archive-bucket");
         Mockito.when(cfg.fileIngestion().mappingId()).thenReturn(Optional.empty());
         InboundJobSupport support = Mockito.mock(InboundJobSupport.class);
         Mockito.when(support.enabled()).thenReturn(true);
         Mockito.when(support.config()).thenReturn(cfg);
-        Mockito.when(support.metrics()).thenReturn(Mockito.mock(VendorExchangeMetrics.class));
+        Mockito.when(support.metrics()).thenReturn(Mockito.mock(DirectoryAccuracyMetrics.class));
         InboundFile entry = InboundFile.fromDocument(new Document("uploadId", UPLOAD_ID)
                 .append("generation", "1760520000123456")
                 .append("state", InboundFileState.ARCHIVING.name())

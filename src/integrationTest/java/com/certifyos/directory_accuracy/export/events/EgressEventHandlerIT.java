@@ -99,8 +99,8 @@ class EgressEventHandlerIT {
     private static String envelope(String messageId, String eventJson) {
         String data = Base64.getEncoder().encodeToString(eventJson.getBytes(StandardCharsets.UTF_8));
         return "{\"message\":{\"data\":\"" + data + "\",\"messageId\":\"" + messageId
-                + "\",\"publishTime\":\"2026-10-01T07:12:01Z\",\"attributes\":{\"initiator\":\"vendor-exchange-worker\"}},"
-                + "\"subscription\":\"projects/p/subscriptions/vendor-exchange-egress-events\"}";
+                + "\",\"publishTime\":\"2026-10-01T07:12:01Z\",\"attributes\":{\"initiator\":\"directory-accuracy-worker\"}},"
+                + "\"subscription\":\"projects/p/subscriptions/vendor-export-egress-events\"}";
     }
 
     private static void push(String messageId, String eventJson) {

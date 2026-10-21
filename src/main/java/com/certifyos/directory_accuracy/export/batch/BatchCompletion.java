@@ -4,7 +4,7 @@ import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -36,14 +36,14 @@ public class BatchCompletion {
     private final AuditRepository audit;
     private final Transactions transactions;
     private final JobEnqueuer enqueuer;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
 
     public BatchCompletion(
             ExportBatchRepository batches,
             AuditRepository audit,
             Transactions transactions,
             JobEnqueuer enqueuer,
-            VendorExchangeMetrics metrics) {
+            DirectoryAccuracyMetrics metrics) {
         this.batches = batches;
         this.audit = audit;
         this.transactions = transactions;

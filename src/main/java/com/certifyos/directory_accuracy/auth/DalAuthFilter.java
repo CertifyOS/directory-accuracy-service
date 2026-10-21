@@ -1,15 +1,15 @@
 package com.certifyos.directory_accuracy.auth;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import jakarta.inject.Singleton;
 
 /** The IAP token for the DAL backend. */
 @Singleton
 public class DalAuthFilter extends GoogleAuthFilter {
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
 
-    public DalAuthFilter(GoogleIdTokenService tokens, VendorExchangeConfig cfg) {
+    public DalAuthFilter(GoogleIdTokenService tokens, DirectoryAccuracyConfig cfg) {
         super(tokens);
         this.cfg = cfg;
     }

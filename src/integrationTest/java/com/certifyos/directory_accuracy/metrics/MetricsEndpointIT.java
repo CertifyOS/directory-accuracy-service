@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 class MetricsEndpointIT {
 
     @Inject
-    VendorExchangeMetrics metrics;
+    DirectoryAccuracyMetrics metrics;
 
     @Test
     void byStateGaugesExistFromBootForEveryState() {

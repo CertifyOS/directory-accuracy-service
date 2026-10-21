@@ -24,7 +24,7 @@ public class WorkerTestProfile implements QuarkusTestProfile {
         values.put("quarkus.jobrunr.dashboard.enabled", "false");
         // Production retries 8 times with 3^n-second backoff (hours). One retry here, so a job that
         // always throws reaches FAILED in about 3 s and the final-failure filter can be observed.
-        values.put("vendor-exchange.job-retries", "1");
+        values.put("directory-accuracy.job-retries", "1");
         return values;
     }
 }

@@ -22,7 +22,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 public interface DalUserClient {
 
     /** The fixed {@code requesting-user-id} the DAL interceptor needs to see. */
-    String REQUESTING_USER_ID = "vendor-exchange-service";
+    String REQUESTING_USER_ID = "directory-accuracy-service";
 
     /** The header the DAL interceptor reads the caller's tenant from. */
     String ORGANIZATION_HEADER = "requesting-organization-id";

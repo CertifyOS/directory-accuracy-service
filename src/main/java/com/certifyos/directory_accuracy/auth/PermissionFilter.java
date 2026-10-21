@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.auth;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.http.Problems;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.Priorities;
@@ -14,7 +14,7 @@ import java.util.Optional;
 import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 
 /**
- * The per-action permission check, behind {@code vendor-exchange.permissions.enforce}. Off, every
+ * The per-action permission check, behind {@code directory-accuracy.permissions.enforce}. Off, every
  * tenant member passes (file-ingestion's rule, today's behaviour). On, the endpoint's {@link
  * RequiresPermission} must appear in the caller's grants for the tenant, else 403. Flipping the
  * flag needs no code change once the DAL has the rows.
@@ -22,10 +22,10 @@ import org.jboss.resteasy.reactive.server.ServerRequestFilter;
 public class PermissionFilter {
 
     // Instance for the same reason as in PubSubPushAuthFilter: filters are built before runtime config.
-    private final Instance<VendorExchangeConfig> cfg;
+    private final Instance<DirectoryAccuracyConfig> cfg;
     private final UserContext ctx;
 
-    public PermissionFilter(Instance<VendorExchangeConfig> cfg, UserContext ctx) {
+    public PermissionFilter(Instance<DirectoryAccuracyConfig> cfg, UserContext ctx) {
         this.cfg = cfg;
         this.ctx = ctx;
     }

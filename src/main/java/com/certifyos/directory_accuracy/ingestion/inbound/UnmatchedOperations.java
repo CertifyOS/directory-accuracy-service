@@ -12,7 +12,7 @@ import com.certifyos.directory_accuracy.ingestion.events.ArrivalEvent;
 import com.certifyos.directory_accuracy.ingestion.events.IngestionRequests;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundLifecycle.Outcome;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -42,7 +42,7 @@ public class UnmatchedOperations {
     private final UnmatchedUploadRepository unmatched;
     private final AuditRepository audit;
     private final Transactions transactions;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final BatchOperations batchOperations;
     private final InboundLifecycle lifecycle;
     private final IngestionRequests requests;
@@ -51,7 +51,7 @@ public class UnmatchedOperations {
             UnmatchedUploadRepository unmatched,
             AuditRepository audit,
             Transactions transactions,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             BatchOperations batchOperations,
             InboundLifecycle lifecycle,
             IngestionRequests requests) {

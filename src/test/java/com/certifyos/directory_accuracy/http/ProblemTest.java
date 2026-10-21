@@ -8,7 +8,7 @@ class ProblemTest {
     @Test
     void derivesTypeAndTitleFromCodeAndStatus() {
         Problem problem = Problem.of(403, "TENANT_FORBIDDEN", "user holds no role in tenant", "/v1/vendor-exports");
-        Assertions.assertEquals("urn:certifyos:vendor-exchange:problem:tenant-forbidden", problem.type());
+        Assertions.assertEquals("urn:certifyos:directory-accuracy:problem:tenant-forbidden", problem.type());
         Assertions.assertEquals("Forbidden", problem.title());
         Assertions.assertEquals(403, problem.status());
         Assertions.assertEquals("TENANT_FORBIDDEN", problem.code());

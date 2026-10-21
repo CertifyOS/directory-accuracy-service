@@ -13,32 +13,32 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class VendorExchangeMetricsTest {
+class DirectoryAccuracyMetricsTest {
 
     /** The fourteen names in the design's Observability section. */
     static final List<String> DESIGN_NAMES = List.of(
-            VendorExchangeMetrics.TICK_DURATION,
-            VendorExchangeMetrics.TICK_SCHEDULES_DUE,
-            VendorExchangeMetrics.SCHEDULES_BY_STATE,
-            VendorExchangeMetrics.BATCHES_CREATED,
-            VendorExchangeMetrics.SELECTION_PRACTITIONERS,
-            VendorExchangeMetrics.SELECTION_PAGES,
-            VendorExchangeMetrics.EGRESS_WAIT_SECONDS,
-            VendorExchangeMetrics.EGRESS_FAILED,
-            VendorExchangeMetrics.COMPLETION_SOURCE,
-            VendorExchangeMetrics.EVENT_REJECTED,
-            VendorExchangeMetrics.RECONCILE_MISMATCH,
-            VendorExchangeMetrics.BATCHES_BY_STATE,
-            VendorExchangeMetrics.JOBS_RETRIES,
-            VendorExchangeMetrics.JOBS_FINAL_FAILURES);
+            DirectoryAccuracyMetrics.TICK_DURATION,
+            DirectoryAccuracyMetrics.TICK_SCHEDULES_DUE,
+            DirectoryAccuracyMetrics.SCHEDULES_BY_STATE,
+            DirectoryAccuracyMetrics.BATCHES_CREATED,
+            DirectoryAccuracyMetrics.SELECTION_PRACTITIONERS,
+            DirectoryAccuracyMetrics.SELECTION_PAGES,
+            DirectoryAccuracyMetrics.EGRESS_WAIT_SECONDS,
+            DirectoryAccuracyMetrics.EGRESS_FAILED,
+            DirectoryAccuracyMetrics.COMPLETION_SOURCE,
+            DirectoryAccuracyMetrics.EVENT_REJECTED,
+            DirectoryAccuracyMetrics.RECONCILE_MISMATCH,
+            DirectoryAccuracyMetrics.BATCHES_BY_STATE,
+            DirectoryAccuracyMetrics.JOBS_RETRIES,
+            DirectoryAccuracyMetrics.JOBS_FINAL_FAILURES);
 
     private SimpleMeterRegistry registry;
-    private VendorExchangeMetrics metrics;
+    private DirectoryAccuracyMetrics metrics;
 
     @BeforeEach
     void before() {
         registry = new SimpleMeterRegistry();
-        metrics = new VendorExchangeMetrics(registry);
+        metrics = new DirectoryAccuracyMetrics(registry);
     }
 
     private Set<String> names() {
@@ -49,14 +49,16 @@ class VendorExchangeMetricsTest {
 
     @Test
     void tickMetersExistBeforeAnyTick() {
-        Assertions.assertTrue(names().contains(VendorExchangeMetrics.TICK_DURATION));
-        Assertions.assertTrue(names().contains(VendorExchangeMetrics.TICK_SCHEDULES_DUE));
+        Assertions.assertTrue(names().contains(DirectoryAccuracyMetrics.TICK_DURATION));
+        Assertions.assertTrue(names().contains(DirectoryAccuracyMetrics.TICK_SCHEDULES_DUE));
         metrics.tick(3, Duration.ofMillis(120));
         Assertions.assertEquals(
                 3.0,
-                registry.get(VendorExchangeMetrics.TICK_SCHEDULES_DUE).gauge().value());
+                registry.get(DirectoryAccuracyMetrics.TICK_SCHEDULES_DUE)
+                        .gauge()
+                        .value());
         Assertions.assertEquals(
-                1, registry.get(VendorExchangeMetrics.TICK_DURATION).timer().count());
+                1, registry.get(DirectoryAccuracyMetrics.TICK_DURATION).timer().count());
     }
 
     @Test
@@ -71,8 +73,8 @@ class VendorExchangeMetricsTest {
         metrics.reconcileMismatch("org-a");
         metrics.jobRetry("SelectJob");
         metrics.jobFinalFailure("SelectJob");
-        metrics.registerGauge(VendorExchangeMetrics.BATCHES_BY_STATE, Tags.of("state", "SCHEDULED"), () -> 2);
-        metrics.registerGauge(VendorExchangeMetrics.SCHEDULES_BY_STATE, Tags.of("state", "ENABLED"), () -> 1);
+        metrics.registerGauge(DirectoryAccuracyMetrics.BATCHES_BY_STATE, Tags.of("state", "SCHEDULED"), () -> 2);
+        metrics.registerGauge(DirectoryAccuracyMetrics.SCHEDULES_BY_STATE, Tags.of("state", "ENABLED"), () -> 1);
         Set<String> registered = names();
         for (String name : DESIGN_NAMES) {
             Assertions.assertTrue(registered.contains(name), "missing " + name);
@@ -111,32 +113,32 @@ class VendorExchangeMetricsTest {
                         "vendor_ingestion.jobs.retries",
                         "vendor_ingestion.jobs.final_failures"),
                 List.of(
-                        VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED,
-                        VendorExchangeMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED,
-                        VendorExchangeMetrics.INGESTION_ARRIVALS_UNMATCHED,
-                        VendorExchangeMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE,
-                        VendorExchangeMetrics.INGESTION_INBOUND_BY_STATE,
-                        VendorExchangeMetrics.INGESTION_INBOUND_AGE_SECONDS,
-                        VendorExchangeMetrics.INGESTION_ARCHIVE_DURATION,
-                        VendorExchangeMetrics.INGESTION_REGISTER_RESULT,
-                        VendorExchangeMetrics.INGESTION_PARSE_WAIT_SECONDS,
-                        VendorExchangeMetrics.INGESTION_COMPLETION_SOURCE,
-                        VendorExchangeMetrics.INGESTION_COMPLETION_STATUS,
-                        VendorExchangeMetrics.INGESTION_STAGE_ROWS,
-                        VendorExchangeMetrics.INGESTION_STAGE_DOCUMENTS,
-                        VendorExchangeMetrics.INGESTION_STAGE_CHUNK_DURATION,
-                        VendorExchangeMetrics.INGESTION_STAGE_STREAM_429,
-                        VendorExchangeMetrics.INGESTION_REVIEW_PENDING,
-                        VendorExchangeMetrics.INGESTION_REVIEW_PENDING_AGE_DAYS,
-                        VendorExchangeMetrics.INGESTION_REVIEW_DECISIONS,
-                        VendorExchangeMetrics.INGESTION_REVIEW_CONFLICTS_409,
-                        VendorExchangeMetrics.INGESTION_RELEASE_JOBS,
-                        VendorExchangeMetrics.INGESTION_RELEASE_FAILED_REASON,
-                        VendorExchangeMetrics.INGESTION_RELEASE_OUTCOME,
-                        VendorExchangeMetrics.INGESTION_RELEASE_READBACK_SECONDS,
-                        VendorExchangeMetrics.INGESTION_OV_EVENTS_NOT_OURS,
-                        VendorExchangeMetrics.INGESTION_JOBS_RETRIES,
-                        VendorExchangeMetrics.INGESTION_JOBS_FINAL_FAILURES));
+                        DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED,
+                        DirectoryAccuracyMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED,
+                        DirectoryAccuracyMetrics.INGESTION_ARRIVALS_UNMATCHED,
+                        DirectoryAccuracyMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE,
+                        DirectoryAccuracyMetrics.INGESTION_INBOUND_BY_STATE,
+                        DirectoryAccuracyMetrics.INGESTION_INBOUND_AGE_SECONDS,
+                        DirectoryAccuracyMetrics.INGESTION_ARCHIVE_DURATION,
+                        DirectoryAccuracyMetrics.INGESTION_REGISTER_RESULT,
+                        DirectoryAccuracyMetrics.INGESTION_PARSE_WAIT_SECONDS,
+                        DirectoryAccuracyMetrics.INGESTION_COMPLETION_SOURCE,
+                        DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS,
+                        DirectoryAccuracyMetrics.INGESTION_STAGE_ROWS,
+                        DirectoryAccuracyMetrics.INGESTION_STAGE_DOCUMENTS,
+                        DirectoryAccuracyMetrics.INGESTION_STAGE_CHUNK_DURATION,
+                        DirectoryAccuracyMetrics.INGESTION_STAGE_STREAM_429,
+                        DirectoryAccuracyMetrics.INGESTION_REVIEW_PENDING,
+                        DirectoryAccuracyMetrics.INGESTION_REVIEW_PENDING_AGE_DAYS,
+                        DirectoryAccuracyMetrics.INGESTION_REVIEW_DECISIONS,
+                        DirectoryAccuracyMetrics.INGESTION_REVIEW_CONFLICTS_409,
+                        DirectoryAccuracyMetrics.INGESTION_RELEASE_JOBS,
+                        DirectoryAccuracyMetrics.INGESTION_RELEASE_FAILED_REASON,
+                        DirectoryAccuracyMetrics.INGESTION_RELEASE_OUTCOME,
+                        DirectoryAccuracyMetrics.INGESTION_RELEASE_READBACK_SECONDS,
+                        DirectoryAccuracyMetrics.INGESTION_OV_EVENTS_NOT_OURS,
+                        DirectoryAccuracyMetrics.INGESTION_JOBS_RETRIES,
+                        DirectoryAccuracyMetrics.INGESTION_JOBS_FINAL_FAILURES));
     }
 
     @Test
@@ -164,26 +166,26 @@ class VendorExchangeMetricsTest {
         metrics.stageChunkDuration(Duration.ofMillis(50));
 
         Map<String, Set<String>> expected = Map.ofEntries(
-                Map.entry(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, Set.of("tenant", "vendor")),
-                Map.entry(VendorExchangeMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, Set.of("tenant", "vendor")),
-                Map.entry(VendorExchangeMetrics.INGESTION_ARRIVALS_UNMATCHED, Set.of("tenant", "reason")),
-                Map.entry(VendorExchangeMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE, Set.of("eventType")),
-                Map.entry(VendorExchangeMetrics.INGESTION_REGISTER_RESULT, Set.of("result")),
-                Map.entry(VendorExchangeMetrics.INGESTION_COMPLETION_SOURCE, Set.of("source")),
-                Map.entry(VendorExchangeMetrics.INGESTION_COMPLETION_STATUS, Set.of("status")),
-                Map.entry(VendorExchangeMetrics.INGESTION_STAGE_ROWS, Set.of("tenant", "disposition")),
-                Map.entry(VendorExchangeMetrics.INGESTION_STAGE_DOCUMENTS, Set.of("tenant")),
-                Map.entry(VendorExchangeMetrics.INGESTION_STAGE_STREAM_429, Set.of()),
-                Map.entry(VendorExchangeMetrics.INGESTION_REVIEW_DECISIONS, Set.of("tenant", "action")),
-                Map.entry(VendorExchangeMetrics.INGESTION_REVIEW_CONFLICTS_409, Set.of("tenant")),
-                Map.entry(VendorExchangeMetrics.INGESTION_RELEASE_JOBS, Set.of("tenant", "result")),
-                Map.entry(VendorExchangeMetrics.INGESTION_RELEASE_FAILED_REASON, Set.of("reason")),
-                Map.entry(VendorExchangeMetrics.INGESTION_RELEASE_OUTCOME, Set.of("tenant", "outcome")),
-                Map.entry(VendorExchangeMetrics.INGESTION_OV_EVENTS_NOT_OURS, Set.of()),
-                Map.entry(VendorExchangeMetrics.INGESTION_JOBS_RETRIES, Set.of("job")),
-                Map.entry(VendorExchangeMetrics.INGESTION_JOBS_FINAL_FAILURES, Set.of("job")),
-                Map.entry(VendorExchangeMetrics.INGESTION_ARCHIVE_DURATION, Set.of("tenant")),
-                Map.entry(VendorExchangeMetrics.INGESTION_STAGE_CHUNK_DURATION, Set.of()));
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, Set.of("tenant", "vendor")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, Set.of("tenant", "vendor")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_UNMATCHED, Set.of("tenant", "reason")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_IGNORED_EVENT_TYPE, Set.of("eventType")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_REGISTER_RESULT, Set.of("result")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_COMPLETION_SOURCE, Set.of("source")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS, Set.of("status")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_STAGE_ROWS, Set.of("tenant", "disposition")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_STAGE_DOCUMENTS, Set.of("tenant")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_STAGE_STREAM_429, Set.of()),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_REVIEW_DECISIONS, Set.of("tenant", "action")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_REVIEW_CONFLICTS_409, Set.of("tenant")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_RELEASE_JOBS, Set.of("tenant", "result")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_RELEASE_FAILED_REASON, Set.of("reason")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_RELEASE_OUTCOME, Set.of("tenant", "outcome")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_OV_EVENTS_NOT_OURS, Set.of()),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_JOBS_RETRIES, Set.of("job")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_JOBS_FINAL_FAILURES, Set.of("job")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_ARCHIVE_DURATION, Set.of("tenant")),
+                Map.entry(DirectoryAccuracyMetrics.INGESTION_STAGE_CHUNK_DURATION, Set.of()));
 
         expected.forEach((name, tagKeys) -> {
             List<Meter> found = List.copyOf(registry.find(name).meters());
@@ -202,17 +204,17 @@ class VendorExchangeMetricsTest {
         }
         Assertions.assertEquals(
                 40.0,
-                registry.get(VendorExchangeMetrics.INGESTION_STAGE_ROWS)
+                registry.get(DirectoryAccuracyMetrics.INGESTION_STAGE_ROWS)
                         .counter()
                         .count());
         Assertions.assertEquals(
                 12.0,
-                registry.get(VendorExchangeMetrics.INGESTION_STAGE_DOCUMENTS)
+                registry.get(DirectoryAccuracyMetrics.INGESTION_STAGE_DOCUMENTS)
                         .counter()
                         .count());
         Assertions.assertEquals(
                 1,
-                registry.get(VendorExchangeMetrics.INGESTION_ARCHIVE_DURATION)
+                registry.get(DirectoryAccuracyMetrics.INGESTION_ARCHIVE_DURATION)
                         .timer()
                         .count());
     }
@@ -223,7 +225,7 @@ class VendorExchangeMetricsTest {
         metrics.batchCreated("org-a", "candor");
         Assertions.assertEquals(
                 2.0,
-                registry.get(VendorExchangeMetrics.BATCHES_CREATED)
+                registry.get(DirectoryAccuracyMetrics.BATCHES_CREATED)
                         .tags("tenant", "org-a", "vendor", "candor")
                         .counter()
                         .count());
@@ -231,13 +233,13 @@ class VendorExchangeMetricsTest {
         metrics.selectionPractitioners("org-a", "candor", 12);
         Assertions.assertEquals(
                 12.0,
-                registry.get(VendorExchangeMetrics.SELECTION_PRACTITIONERS)
+                registry.get(DirectoryAccuracyMetrics.SELECTION_PRACTITIONERS)
                         .tags("tenant", "org-a", "vendor", "candor")
                         .gauge()
                         .value());
         Assertions.assertEquals(
                 1,
-                registry.find(VendorExchangeMetrics.SELECTION_PRACTITIONERS)
+                registry.find(DirectoryAccuracyMetrics.SELECTION_PRACTITIONERS)
                         .gauges()
                         .size(),
                 "one gauge per tag set, re-set in place");

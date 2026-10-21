@@ -9,7 +9,7 @@ import com.certifyos.directory_accuracy.clients.FileIngestionCounts;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.jobs.JobLogContext;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.ClientSession;
@@ -59,14 +59,14 @@ public class InboundLifecycle {
     private final InboundFileRepository inbound;
     private final AuditRepository audit;
     private final Transactions transactions;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final InboundClaims claims;
 
     public InboundLifecycle(
             InboundFileRepository inbound,
             AuditRepository audit,
             Transactions transactions,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             InboundClaims claims) {
         this.inbound = inbound;
         this.audit = audit;

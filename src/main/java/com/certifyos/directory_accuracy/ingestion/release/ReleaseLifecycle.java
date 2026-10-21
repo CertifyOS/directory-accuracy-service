@@ -3,13 +3,13 @@ package com.certifyos.directory_accuracy.ingestion.release;
 import com.certifyos.directory_accuracy.audit.Actors;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.ingestion.jobs.IngestionLogContext;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation.GoldenRecordUpdate;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.model.Updates;
@@ -55,16 +55,16 @@ public class ReleaseLifecycle {
     private final ReleaseFieldRepository releaseFields;
     private final AuditRepository audit;
     private final Transactions transactions;
-    private final VendorExchangeMetrics metrics;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyMetrics metrics;
+    private final DirectoryAccuracyConfig cfg;
 
     public ReleaseLifecycle(
             FieldRecommendationRepository fields,
             ReleaseFieldRepository releaseFields,
             AuditRepository audit,
             Transactions transactions,
-            VendorExchangeMetrics metrics,
-            VendorExchangeConfig cfg) {
+            DirectoryAccuracyMetrics metrics,
+            DirectoryAccuracyConfig cfg) {
         this.fields = fields;
         this.releaseFields = releaseFields;
         this.audit = audit;
@@ -421,12 +421,12 @@ public class ReleaseLifecycle {
     }
 
     /** The service configuration, for the settings the release job reads. */
-    public VendorExchangeConfig config() {
+    public DirectoryAccuracyConfig config() {
         return cfg;
     }
 
     /** The service metrics, for the release job's counters. */
-    public VendorExchangeMetrics metrics() {
+    public DirectoryAccuracyMetrics metrics() {
         return metrics;
     }
 }

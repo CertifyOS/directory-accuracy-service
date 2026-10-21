@@ -3,7 +3,7 @@ package com.certifyos.directory_accuracy.auth;
 /**
  * The operator permissions from the designs, as DAL resource and action: two for exports, three
  * for reviewing the vendor's recommendations. Checked per endpoint only when {@code
- * vendor-exchange.permissions.enforce} is true.
+ * directory-accuracy.permissions.enforce} is true.
  */
 public enum Permission {
     /** Create, change, run and retry exports. */

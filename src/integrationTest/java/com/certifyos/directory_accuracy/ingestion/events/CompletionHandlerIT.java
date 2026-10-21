@@ -5,7 +5,7 @@ import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
 import com.certifyos.directory_accuracy.export.events.PubSubPushMessage;
@@ -21,7 +21,7 @@ import com.certifyos.directory_accuracy.ingestion.jobs.IngestionDeadlineCheckJob
 import com.certifyos.directory_accuracy.ingestion.jobs.IngestionJobEnqueuer;
 import com.certifyos.directory_accuracy.ingestion.jobs.StageRowsJob;
 import com.certifyos.directory_accuracy.ingestion.staging.StagingLifecycle;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -218,8 +218,8 @@ class CompletionHandlerIT {
         String tenant = "compl-completed";
         Seeded seeded = requested(tenant);
         int before = trail(seeded).size();
-        double fromEvent = counter(VendorExchangeMetrics.INGESTION_COMPLETION_SOURCE, "source", "EVENT");
-        double completed = counter(VendorExchangeMetrics.INGESTION_COMPLETION_STATUS, "status", "COMPLETED");
+        double fromEvent = counter(DirectoryAccuracyMetrics.INGESTION_COMPLETION_SOURCE, "source", "EVENT");
+        double completed = counter(DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS, "status", "COMPLETED");
 
         CompletionHandler.Outcome outcome =
                 handler.handle(message("m-c1", parsedBody(tenant, externalRef(seeded), seeded, "COMPLETED")));
@@ -245,9 +245,9 @@ class CompletionHandlerIT {
         Assertions.assertEquals("EVENT", written.get(0).detail().get("completionSource"));
         Assertions.assertEquals("COMPLETED", written.get(0).detail().get("status"));
         Assertions.assertEquals(
-                fromEvent + 1, counter(VendorExchangeMetrics.INGESTION_COMPLETION_SOURCE, "source", "EVENT"));
+                fromEvent + 1, counter(DirectoryAccuracyMetrics.INGESTION_COMPLETION_SOURCE, "source", "EVENT"));
         Assertions.assertEquals(
-                completed + 1, counter(VendorExchangeMetrics.INGESTION_COMPLETION_STATUS, "status", "COMPLETED"));
+                completed + 1, counter(DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS, "status", "COMPLETED"));
     }
 
     @Test
@@ -273,7 +273,7 @@ class CompletionHandlerIT {
         String tenant = "compl-invalid";
         Seeded seeded = requested(tenant);
         int before = trail(seeded).size();
-        double invalid = counter(VendorExchangeMetrics.INGESTION_COMPLETION_STATUS, "status", "INVALID");
+        double invalid = counter(DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS, "status", "INVALID");
 
         CompletionHandler.Outcome outcome =
                 handler.handle(message("m-i1", invalidBody(tenant, externalRef(seeded), "STRUCTURE_REJECTED")));
@@ -292,7 +292,7 @@ class CompletionHandlerIT {
         Assertions.assertEquals("STRUCTURE_REJECTED", written.get(0).detail().get("reason"));
         Assertions.assertEquals("EVENT", written.get(0).detail().get("completionSource"));
         Assertions.assertEquals(
-                invalid + 1, counter(VendorExchangeMetrics.INGESTION_COMPLETION_STATUS, "status", "INVALID"));
+                invalid + 1, counter(DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS, "status", "INVALID"));
     }
 
     @Test
@@ -476,7 +476,7 @@ class CompletionHandlerIT {
     void disabledServiceAcknowledgesWithoutWriting() {
         String tenant = "compl-disabled";
         Seeded seeded = requested(tenant);
-        VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
+        DirectoryAccuracyConfig disabled = Mockito.mock(DirectoryAccuracyConfig.class, Answers.RETURNS_DEEP_STUBS);
         Mockito.when(disabled.enabled()).thenReturn(false);
         CompletionHandler off =
                 new CompletionHandler(mapper, inbound, lifecycle, stagingLifecycle, enqueuer, disabled, clock);

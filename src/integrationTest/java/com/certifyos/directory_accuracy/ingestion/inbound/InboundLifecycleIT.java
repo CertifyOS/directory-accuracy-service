@@ -15,7 +15,7 @@ import com.certifyos.directory_accuracy.ingestion.InboundFixtures;
 import com.certifyos.directory_accuracy.ingestion.events.ArrivalEvent;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.Located;
 import com.certifyos.directory_accuracy.ingestion.jobs.IngestionLogContext;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import com.certifyos.directory_accuracy.persistence.Transactions;
@@ -134,8 +134,8 @@ public class InboundLifecycleIT {
         Assertions.assertEquals(before + 3, trail(batch.id()).size());
         Assertions.assertEquals(
                 afterDuplicate.version(), batches.find(batch.id()).orElseThrow().version());
-        Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
-        Assertions.assertEquals(1.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, tenant));
+        Assertions.assertEquals(1.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
+        Assertions.assertEquals(1.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_DUPLICATE_LOGGED, tenant));
     }
 
     @Test
@@ -161,7 +161,7 @@ public class InboundLifecycleIT {
         Assertions.assertEquals(superseded.version(), after.version(), "the batch was not written");
         Assertions.assertNull(after.acknowledgedAt());
         Assertions.assertNull(after.inboundBatchId());
-        Assertions.assertEquals(0.0, counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
+        Assertions.assertEquals(0.0, counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, tenant));
     }
 
     @Test
@@ -230,7 +230,7 @@ public class InboundLifecycleIT {
         }
         Assertions.assertEquals(
                 0.0,
-                counter(VendorExchangeMetrics.INGESTION_ARRIVALS_RECEIVED, tenant),
+                counter(DirectoryAccuracyMetrics.INGESTION_ARRIVALS_RECEIVED, tenant),
                 "claimIn records no metric; its caller does after the commit");
     }
 
@@ -502,7 +502,7 @@ public class InboundLifecycleIT {
     }
 
     private double statusCount(String status) {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_COMPLETION_STATUS)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_COMPLETION_STATUS)
                 .tag("status", status)
                 .counter();
         return found == null ? 0 : found.count();

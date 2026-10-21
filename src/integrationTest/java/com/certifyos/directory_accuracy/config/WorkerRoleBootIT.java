@@ -54,7 +54,7 @@ public class WorkerRoleBootIT {
         Awaitility.await().atMost(Duration.ofSeconds(30)).until(() -> !storage.getBackgroundJobServers()
                 .isEmpty());
         List<String> names =
-                mongo.getDatabase("vendor_exchange").listCollectionNames().into(new java.util.ArrayList<>());
+                mongo.getDatabase("directory_accuracy").listCollectionNames().into(new java.util.ArrayList<>());
         Assertions.assertTrue(names.contains("jobrunr_background_job_servers"), "collections: " + names);
         Assertions.assertTrue(names.contains("jobrunr_metadata"), "collections: " + names);
         Assertions.assertTrue(

@@ -7,11 +7,11 @@
 #               https://ng-api-stg.certifyos.com/). Without it only the unauthenticated cases run.
 #   LB_IP       reach the load balancer by IP with the Host header until the DNS record exists;
 #               the managed certificate is not valid yet then, so TLS verification is skipped.
-#   HOST        hostname (default vendor-exchange.internal.certifyos.com)
+#   HOST        hostname (default directory-accuracy.internal.certifyos.com)
 #   TENANT      tenant-id header for the authenticated cases (default tenant-id-001)
 # Never prints the token.
 set -uo pipefail
-HOST=${HOST:-vendor-exchange.internal.certifyos.com}
+HOST=${HOST:-directory-accuracy.internal.certifyos.com}
 TENANT=${TENANT:-tenant-id-001}
 BASE="https://$HOST"
 CURL=(curl -s -m 20)

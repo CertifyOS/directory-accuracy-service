@@ -6,14 +6,14 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * Deployment configuration, one closed namespace: {@code vendor-exchange.*}. SmallRye validates the
+ * Deployment configuration, one closed namespace: {@code directory-accuracy.*}. SmallRye validates the
  * whole mapping at startup, so a key without a default that the environment forgets fails the boot
  * instead of running with a wrong value. Keys that are {@link Optional} are the swap-in points from
  * the scaffolding plan (section 2): absent until the external dependency exists, read by code that
  * reports "not configured" rather than failing.
  */
-@ConfigMapping(prefix = "vendor-exchange")
-public interface VendorExchangeConfig {
+@ConfigMapping(prefix = "directory-accuracy")
+public interface DirectoryAccuracyConfig {
 
     /** Service-wide kill switch: the tick inserts nothing, jobs exit as no-ops, events are acknowledged and ignored. */
     @WithDefault("true")

@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.ingestion.events;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.events.PubSubPushMessage;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
@@ -56,7 +56,7 @@ public class CompletionHandler {
     private final InboundLifecycle lifecycle;
     private final StagingLifecycle stagingLifecycle;
     private final IngestionJobEnqueuer enqueuer;
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final Clock clock;
 
     public CompletionHandler(
@@ -65,7 +65,7 @@ public class CompletionHandler {
             InboundLifecycle lifecycle,
             StagingLifecycle stagingLifecycle,
             IngestionJobEnqueuer enqueuer,
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             Clock clock) {
         this.mapper = mapper;
         this.inbound = inbound;

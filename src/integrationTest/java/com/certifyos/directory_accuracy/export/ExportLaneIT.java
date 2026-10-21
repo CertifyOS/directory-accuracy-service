@@ -248,7 +248,7 @@ class ExportLaneIT {
                                         + "\"templateId\":\"tpl-lane\",\"mappingsCsvUrl\":\"gs://egress-templates/"
                                         + TENANT + "/tpl-lane/v2/mappings.csv\","
                                         + "\"separator\":\";\",\"outputFormat\":\"csv\",\"rowExpansionKeys\":\"[\\\"locations\\\"]\","
-                                        + "\"npiFilter\":[\"1234567893\",\"2345678918\",\"3456789012\"],\"userId\":\"vendor-exchange-worker\","
+                                        + "\"npiFilter\":[\"1234567893\",\"2345678918\",\"3456789012\"],\"userId\":\"directory-accuracy-worker\","
                                         + "\"destination\":{\"bucket\":\"test-vendor-bucket\",\"objectName\":\""
                                         + objectName + "\"}}",
                                 true,
@@ -406,7 +406,7 @@ class ExportLaneIT {
                 1,
                 WireMock.postRequestedFor(WireMock.urlEqualTo(
                                 "/api/v1/egress/jobs/practitioner/" + TENANT + "/" + first + "/cancel"))
-                        .withHeader("x-user-id", WireMock.equalTo("vendor-exchange-worker")));
+                        .withHeader("x-user-id", WireMock.equalTo("directory-accuracy-worker")));
         WireMockUpstreams.verify(
                 1,
                 WireMock.postRequestedFor(WireMock.urlEqualTo(EXPORT))

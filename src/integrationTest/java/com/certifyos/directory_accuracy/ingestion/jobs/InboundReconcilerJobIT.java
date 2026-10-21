@@ -5,7 +5,7 @@ import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
 import com.certifyos.directory_accuracy.ingestion.InboundFixtures;
 import com.certifyos.directory_accuracy.ingestion.InboundFixtures.Seeded;
@@ -278,7 +278,7 @@ class InboundReconcilerJobIT {
     @Test
     void disabledServiceDoesNothing() {
         Seeded received = stale("inrecon-disabled", InboundFileState.RECEIVED, STALE);
-        VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
+        DirectoryAccuracyConfig disabled = Mockito.mock(DirectoryAccuracyConfig.class, Answers.RETURNS_DEEP_STUBS);
         Mockito.when(disabled.enabled()).thenReturn(false);
         InboundReconcilerJob off = new InboundReconcilerJob(disabled, inbound, audit, transactions, enqueuer, clock);
 

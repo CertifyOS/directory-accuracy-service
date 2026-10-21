@@ -6,7 +6,7 @@ import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository.
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileState;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundLifecycle;
 import com.certifyos.directory_accuracy.ingestion.release.ReleaseLifecycle;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Clock;
 import java.util.EnumSet;
@@ -54,14 +54,14 @@ public class IngestionFinalFailureFilter implements ApplyStateFilter {
     private final InboundFileRepository inbound;
     private final InboundLifecycle inboundLifecycle;
     private final ReleaseLifecycle releaseLifecycle;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final Clock clock;
 
     public IngestionFinalFailureFilter(
             InboundFileRepository inbound,
             InboundLifecycle inboundLifecycle,
             ReleaseLifecycle releaseLifecycle,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             Clock clock) {
         this.inbound = inbound;
         this.inboundLifecycle = inboundLifecycle;

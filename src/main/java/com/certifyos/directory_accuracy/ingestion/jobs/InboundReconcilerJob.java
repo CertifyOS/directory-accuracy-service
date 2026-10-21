@@ -4,7 +4,7 @@ import com.certifyos.directory_accuracy.audit.Actors;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFile;
 import com.certifyos.directory_accuracy.ingestion.inbound.InboundFileRepository;
@@ -64,7 +64,7 @@ public class InboundReconcilerJob {
 
     private static final Logger LOG = Logger.getLogger(InboundReconcilerJob.class);
 
-    private final VendorExchangeConfig cfg;
+    private final DirectoryAccuracyConfig cfg;
     private final InboundFileRepository inbound;
     private final AuditRepository audit;
     private final Transactions transactions;
@@ -72,7 +72,7 @@ public class InboundReconcilerJob {
     private final Clock clock;
 
     public InboundReconcilerJob(
-            VendorExchangeConfig cfg,
+            DirectoryAccuracyConfig cfg,
             InboundFileRepository inbound,
             AuditRepository audit,
             Transactions transactions,

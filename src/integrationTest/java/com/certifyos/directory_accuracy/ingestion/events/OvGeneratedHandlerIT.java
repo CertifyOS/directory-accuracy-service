@@ -7,7 +7,7 @@ import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
 import com.certifyos.directory_accuracy.auth.GoogleIdTokenService;
 import com.certifyos.directory_accuracy.auth.WireMockDal;
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.events.PubSubPushMessage;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import com.certifyos.directory_accuracy.ingestion.jobs.IngestionJobEnqueuer;
@@ -17,7 +17,7 @@ import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendation.GoldenRecordUpdate;
 import com.certifyos.directory_accuracy.ingestion.staging.FieldRecommendationRepository;
 import com.certifyos.directory_accuracy.ingestion.staging.ReviewStatus;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.client.WireMock;
@@ -148,7 +148,7 @@ class OvGeneratedHandlerIT {
     }
 
     private double notOurs() {
-        Counter found = registry.find(VendorExchangeMetrics.INGESTION_OV_EVENTS_NOT_OURS)
+        Counter found = registry.find(DirectoryAccuracyMetrics.INGESTION_OV_EVENTS_NOT_OURS)
                 .counter();
         return found == null ? 0 : found.count();
     }
@@ -310,11 +310,11 @@ class OvGeneratedHandlerIT {
 
     @Test
     void aSwitchedOffServiceRefusesForRedelivery() {
-        VendorExchangeConfig disabled = Mockito.mock(VendorExchangeConfig.class);
+        DirectoryAccuracyConfig disabled = Mockito.mock(DirectoryAccuracyConfig.class);
         Mockito.when(disabled.enabled()).thenReturn(false);
         OvGeneratedHandler off = new OvGeneratedHandler(
                 Mockito.mock(ReadBackService.class),
-                Mockito.mock(VendorExchangeMetrics.class),
+                Mockito.mock(DirectoryAccuracyMetrics.class),
                 mapper,
                 disabled,
                 java.time.Clock.systemUTC());

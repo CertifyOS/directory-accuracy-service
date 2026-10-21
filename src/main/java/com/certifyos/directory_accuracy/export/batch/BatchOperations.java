@@ -10,7 +10,7 @@ import com.certifyos.directory_accuracy.export.jobs.SelectJob;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
 import com.certifyos.directory_accuracy.http.ProblemException;
-import com.certifyos.directory_accuracy.metrics.VendorExchangeMetrics;
+import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
 import com.certifyos.directory_accuracy.persistence.AlreadyExistsException;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Updates;
@@ -43,7 +43,7 @@ public class BatchOperations {
     private final AuditRepository audit;
     private final Transactions transactions;
     private final JobEnqueuer enqueuer;
-    private final VendorExchangeMetrics metrics;
+    private final DirectoryAccuracyMetrics metrics;
     private final Clock clock;
 
     public BatchOperations(
@@ -52,7 +52,7 @@ public class BatchOperations {
             AuditRepository audit,
             Transactions transactions,
             JobEnqueuer enqueuer,
-            VendorExchangeMetrics metrics,
+            DirectoryAccuracyMetrics metrics,
             Clock clock) {
         this.batches = batches;
         this.schedules = schedules;

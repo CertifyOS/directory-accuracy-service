@@ -63,7 +63,7 @@ class RequestEgressJobIT {
     static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     static final String EXPORT = "/api/v1/egress/export";
     static final String TEMPLATE_JSON =
-            "{\"id\":\"tpl-1\",\"tenantId\":\"%s\",\"templateName\":\"vendor-exchange candor certify-export-v1\","
+            "{\"id\":\"tpl-1\",\"tenantId\":\"%s\",\"templateName\":\"directory-accuracy candor certify-export-v1\","
                     + "\"entityType\":\"practitioner\",\"status\":\"active\",\"version\":3,"
                     + "\"mappingsCsvUrl\":\"gs://egress-templates/%s/tpl-1/v3/mappings.csv\",\"separator\":\";\","
                     + "\"outputFormat\":\"csv\",\"rowExpansionKeys\":[\"locations\"]}";
@@ -184,7 +184,7 @@ class RequestEgressJobIT {
                 + "\"templateId\":\"tpl-1\",\"mappingsCsvUrl\":\"gs://egress-templates/" + tenant
                 + "/tpl-1/v3/mappings.csv\","
                 + "\"separator\":\";\",\"outputFormat\":\"csv\",\"rowExpansionKeys\":\"[\\\"locations\\\"]\","
-                + "\"npiFilter\":[\"1234567893\",\"2345678918\"],\"userId\":\"vendor-exchange-worker\","
+                + "\"npiFilter\":[\"1234567893\",\"2345678918\"],\"userId\":\"directory-accuracy-worker\","
                 + "\"destination\":{\"bucket\":\"test-vendor-bucket\",\"objectName\":\"" + objectName + "\"}}";
     }
 
@@ -261,7 +261,7 @@ class RequestEgressJobIT {
         WireMockUpstreams.verify(
                 1,
                 WireMock.postRequestedFor(WireMock.urlPathMatching("/api/v1/egress/jobs/practitioner/.*/cancel"))
-                        .withHeader("x-user-id", WireMock.equalTo("vendor-exchange-worker")));
+                        .withHeader("x-user-id", WireMock.equalTo("directory-accuracy-worker")));
         WireMockUpstreams.verify(0, WireMock.getRequestedFor(WireMock.urlPathMatching("/api/v1/egress-templates/.*")));
         WireMockUpstreams.verify(
                 1,

@@ -31,7 +31,7 @@ class EgressEventTest {
         PubSubPushMessage envelope = mapper.readValue(
                 """
                 {"message":{"data":"e30=","messageId":"m-1","publishTime":"2026-10-01T07:12:01Z"},
-                 "subscription":"projects/p/subscriptions/vendor-exchange-egress-events"}
+                 "subscription":"projects/p/subscriptions/vendor-export-egress-events"}
                 """,
                 PubSubPushMessage.class);
         Assertions.assertEquals("m-1", envelope.message().messageId());

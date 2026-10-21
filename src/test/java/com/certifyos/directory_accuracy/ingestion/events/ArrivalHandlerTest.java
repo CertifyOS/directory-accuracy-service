@@ -1,6 +1,6 @@
 package com.certifyos.directory_accuracy.ingestion.events;
 
-import com.certifyos.directory_accuracy.config.VendorExchangeConfig;
+import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import java.time.Clock;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -11,7 +11,7 @@ class ArrivalHandlerTest {
 
     @Test
     void refusesACompletenessSignalOtherThanDataFile() {
-        VendorExchangeConfig cfg = Mockito.mock(VendorExchangeConfig.class, Answers.RETURNS_DEEP_STUBS);
+        DirectoryAccuracyConfig cfg = Mockito.mock(DirectoryAccuracyConfig.class, Answers.RETURNS_DEEP_STUBS);
         Mockito.when(cfg.ingestion().completenessSignal()).thenReturn("MANIFEST");
 
         IllegalStateException refused = Assertions.assertThrows(
