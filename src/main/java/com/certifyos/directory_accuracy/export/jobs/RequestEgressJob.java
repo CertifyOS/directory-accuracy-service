@@ -112,6 +112,7 @@ public class RequestEgressJob implements JobRequestHandler<RequestEgressJobReque
                 pinned.outputFormat(),
                 jsonArray(pinned.rowExpansionKeys()),
                 npiFilter,
+                null,
                 EgressClient.INITIATOR,
                 new EgressExportRequest.Destination(
                         pinned.destination().bucket(), pinned.destination().objectName()));

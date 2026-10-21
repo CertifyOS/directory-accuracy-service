@@ -49,6 +49,7 @@ class EgressClientIT {
                 "csv",
                 "[\"locations\"]",
                 List.of("1234567893"),
+                null,
                 EgressClient.INITIATOR,
                 new EgressExportRequest.Destination("test-vendor-bucket", "from/org-a/f.csv"));
     }
