@@ -6,7 +6,7 @@ The one guidance file for coding agents and people. Other tool files point here.
 
 - Directory accuracy vendor exchange: scheduled practitioner export to an accuracy vendor (phase 1), ingestion of the vendor's response (phase 2). Design: Confluence "CP-39602 - Design: Directory accuracy vendor export". Plan: `cos-docs/directory-accuracy/vendor-export/scaffolding-implementation-plan.md`.
 - One image, two roles by Quarkus profile: `api` (HTTP behind the load balancer) and `worker` (JobRunr server, no inbound traffic). `RoleProfileCheck` refuses to boot with neither or both.
-- Quarkus 3.33.3, JobRunr 8.8.2, MongoDB database `vendor_exchange`, Java 21. Imperative code only (blocking Mongo driver, JobRunr); no Mutiny.
+- Quarkus 3.33.4, JobRunr 8.8.2, MongoDB database `vendor_exchange`, Java 21. Imperative code only (blocking Mongo driver, JobRunr); no Mutiny.
 
 ## Layout (ArchitectureTest enforces the dependency rules)
 
