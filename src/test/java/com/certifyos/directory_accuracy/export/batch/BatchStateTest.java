@@ -23,6 +23,9 @@ class BatchStateTest {
             Assertions.assertTrue(state.canTransitionTo(BatchState.FAILED), state + " must be able to fail");
         }
         Assertions.assertEquals(EnumSet.of(BatchState.SCHEDULED), BatchState.FAILED.allowedNext(), "retry");
+        Assertions.assertTrue(
+                BatchState.EGRESS_REQUESTED.canTransitionTo(BatchState.SCHEDULED),
+                "egress could not reuse a retry's list; the next attempt asks again");
     }
 
     @Test

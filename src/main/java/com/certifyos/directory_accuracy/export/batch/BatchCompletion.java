@@ -3,6 +3,7 @@ package com.certifyos.directory_accuracy.export.batch;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
+import com.certifyos.directory_accuracy.clients.EgressFailureReason;
 import com.certifyos.directory_accuracy.clients.EgressSelection;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
 import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
@@ -61,12 +62,15 @@ public class BatchCompletion {
      * @param totalRecords practitioners in the file
      * @param totalRows rows in the file
      * @param completedAt when egress finished, or null
+     * @param selection egress's selection block, or null when the event or status carried none
      */
-    public record Outcome(String outputUri, Long totalRecords, Long totalRows, Instant completedAt) {}
+    public record Outcome(
+            String outputUri, Long totalRecords, Long totalRows, Instant completedAt, EgressSelection selection) {}
 
     /**
      * Egress finished the file: {@code EGRESS_REQUESTED} to {@code EGRESS_COMPLETED} with the
-     * completion source and time, {@code EXPORT_EGRESS_COMPLETED} and the companions in one
+     * completion source and time, egress's selection counts when reported,
+     * {@code EXPORT_EGRESS_COMPLETED} and the companions in one
      * transaction; then the finish job, and the pending deadline check is deleted when the event
      * path completed (the deadline path is that job itself).
      *
@@ -90,8 +94,14 @@ public class BatchCompletion {
                         0,
                         Duration.between(batch.egress().requestedAt(), completedAt)
                                 .getSeconds());
-        Bson updates = Updates.combine(
-                Updates.set("egress.completedAt", completedAt), Updates.set("egress.completionSource", source.name()));
+        EgressSelection selection = outcome.selection();
+        boolean counted = selection != null && selection.distinct() != null;
+        List<Bson> changes = new java.util.ArrayList<>(List.of(
+                Updates.set("egress.completedAt", completedAt), Updates.set("egress.completionSource", source.name())));
+        if (counted) {
+            changes.addAll(selectionUpdates(selection, now));
+        }
+        Bson updates = Updates.combine(changes);
         AuditEvent event = AuditEvent.forBatch(
                         AuditEventType.EXPORT_EGRESS_COMPLETED,
                         batch.tenantId(),
@@ -115,6 +125,9 @@ public class BatchCompletion {
         UUID jobId = enqueuer.finish(batch.id(), batch.attempt());
         metrics.completion(source.name());
         metrics.egressWaitSeconds(batch.tenantId(), waitSeconds);
+        if (counted) {
+            metrics.selectionPractitioners(batch.tenantId(), batch.vendor(), selection.distinct());
+        }
         LOG.infof("%s egress completed (%s) after %d s; finish job %s", batch.id(), source, waitSeconds, jobId);
         return java.util.Optional.of(jobId);
     }
@@ -256,6 +269,123 @@ public class BatchCompletion {
         } else {
             LOG.infof("%s DELIVERED, %d practitioners reconciled", batch.id(), reconciliation.selected());
         }
+        return true;
+    }
+
+    /**
+     * Egress reported the export failed: the reason decides the outcome.
+     *
+     * <ul>
+     *   <li>{@code NO_MATCHING_PRACTITIONERS}: the saved filter matched nobody, {@code EMPTY} with
+     *       {@code EXPORT_BATCH_EMPTY}; no job follows.
+     *   <li>{@code REUSE_SOURCE_UNUSABLE}: a retry's reuse source was gone or empty after egress
+     *       accepted it; see {@link #reuseRefused}.
+     *   <li>Anything else: {@code FAILED} at {@code EGRESS} with {@code EGRESS_FAILED}.
+     * </ul>
+     *
+     * @param batch the batch, in {@code EGRESS_REQUESTED}
+     * @param failureReason egress's reason text ({@code "REASON"} or {@code "REASON (detail)"}), or null
+     * @param lastError what was observed, for a failure
+     * @param source how the outcome arrived
+     * @param companions events to commit with the transition
+     * @param now the time of the write
+     * @param deleteDeadlineJob whether to delete the stored deadline job after the commit; the
+     *     deadline check passes false, as for {@link #failed}
+     * @return true when the batch was moved
+     */
+    public boolean egressFailed(
+            ExportBatch batch,
+            String failureReason,
+            String lastError,
+            EgressDetails.CompletionSource source,
+            List<AuditEvent> companions,
+            Instant now,
+            boolean deleteDeadlineJob) {
+        boolean moved;
+        if (EgressFailureReason.is(failureReason, EgressFailureReason.NO_MATCHING_PRACTITIONERS)) {
+            moved = markEmpty(batch, failureReason, source, companions, now);
+        } else if (EgressFailureReason.is(failureReason, EgressFailureReason.REUSE_SOURCE_UNUSABLE)) {
+            moved = reuseRefused(batch, failureReason, source, companions, now);
+        } else {
+            return failed(
+                    batch, BatchState.EGRESS_REQUESTED, EGRESS_FAILED, lastError, companions, now, deleteDeadlineJob);
+        }
+        if (moved && deleteDeadlineJob) {
+            deleteDeadline(batch);
+        }
+        return moved;
+    }
+
+    private boolean markEmpty(
+            ExportBatch batch,
+            String failureReason,
+            EgressDetails.CompletionSource source,
+            List<AuditEvent> companions,
+            Instant now) {
+        Bson updates =
+                Updates.combine(Updates.set("selection.distinct", 0L), Updates.set("selection.completedAt", now));
+        AuditEvent event = AuditEvent.forBatch(
+                        AuditEventType.EXPORT_BATCH_EMPTY,
+                        batch.tenantId(),
+                        batch.vendor(),
+                        batch.id(),
+                        batch.attempt())
+                .occurredAt(now)
+                .detail("filterId", batch.selection().filterId())
+                .detail("failureReason", failureReason)
+                .detail("completionSource", source.name())
+                .build();
+        if (!transition(batch, BatchState.EGRESS_REQUESTED, BatchState.EMPTY, updates, event, companions, now)) {
+            return false;
+        }
+        metrics.selectionPractitioners(batch.tenantId(), batch.vendor(), 0);
+        LOG.infof(
+                "%s: saved filter %s matched nobody; EMPTY",
+                batch.id(), batch.selection().filterId());
+        return true;
+    }
+
+    /**
+     * Egress accepted a retry's {@code reuseSelectionFrom} and then found the earlier list gone or
+     * empty. The same correlation id cannot be sent again (egress answers {@code 409} for a known
+     * one), so the batch goes back to {@code SCHEDULED} as attempt + 1 with
+     * {@code EXPORT_REUSE_REFUSED}, and the egress request job runs for the new attempt. That job
+     * asks to reuse this attempt, egress refuses at once (its selection never finished), and the
+     * job sends the filter id and records {@code selection.reEvaluated}.
+     */
+    private boolean reuseRefused(
+            ExportBatch batch,
+            String failureReason,
+            EgressDetails.CompletionSource source,
+            List<AuditEvent> companions,
+            Instant now) {
+        int attempt = batch.attempt() + 1;
+        AuditEvent event = AuditEvent.forBatch(
+                        AuditEventType.EXPORT_REUSE_REFUSED,
+                        batch.tenantId(),
+                        batch.vendor(),
+                        batch.id(),
+                        batch.attempt())
+                .occurredAt(now)
+                .detail("egressCorrelationId", batch.egress().correlationId())
+                .detail("failureReason", failureReason)
+                .detail("completionSource", source.name())
+                .detail("newAttempt", attempt)
+                .build();
+        if (!transition(
+                batch,
+                BatchState.EGRESS_REQUESTED,
+                BatchState.SCHEDULED,
+                Updates.set("attempt", attempt),
+                event,
+                companions,
+                now)) {
+            return false;
+        }
+        UUID jobId = enqueuer.requestEgress(batch.id(), attempt);
+        LOG.infof(
+                "%s: egress could not reuse the list for %s; attempt %d asks again, job %s",
+                batch.id(), batch.egress().correlationId(), attempt, jobId);
         return true;
     }
 

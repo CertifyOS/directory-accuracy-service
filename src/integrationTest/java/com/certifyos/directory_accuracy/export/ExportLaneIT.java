@@ -182,7 +182,7 @@ class ExportLaneIT {
                         + "\",\"correlationId\":\"" + correlationId + "\",\"phase\":\"" + phase + "\","
                         + "\"outputUri\":\"gs://test-vendor-bucket/from/" + TENANT
                         + "/x.csv\",\"totalRecords\":3,\"totalRows\":4,"
-                        + (phase.equals("FAILED") ? "\"failureMessage\":\"dataflow died\"," : "")
+                        + (phase.equals("FAILED") ? "\"failureMessage\":\"dataflow died\"," : SELECTION_BLOCK + ",")
                         + "\"completedAt\":\"2026-10-01T07:12:00Z\"}";
         String data = Base64.getEncoder().encodeToString(event.getBytes(StandardCharsets.UTF_8));
         RestAssured.given()
@@ -246,7 +246,6 @@ class ExportLaneIT {
     void runNowToDeliveredThroughTheCompletionEvent() {
         String correlationId = batchIdFor("candor") + "-r1";
         stubExportAccepted(correlationId);
-        stubStatusCompleted(correlationId);
         String batchId = runNow("candor");
 
         ExportBatch requested = awaitState(batchId, BatchState.EGRESS_REQUESTED);
@@ -310,6 +309,7 @@ class ExportLaneIT {
         Assertions.assertEquals(3L, delivered.selection().distinct());
         Assertions.assertEquals(
                 "gs://egress-list-used/lane.csv", delivered.selection().listUsedUri());
+        WireMockUpstreams.verify(0, WireMock.getRequestedFor(WireMock.urlPathMatching("/api/v1/egress/status/.*")));
         Assertions.assertNotNull(delivered.deliveredAt());
         Assertions.assertEquals(
                 StateName.DELETED,
@@ -393,7 +393,6 @@ class ExportLaneIT {
         String second = batchIdFor("lane-retry") + "-r2";
         stubExportAccepted(first);
         stubExportAccepted(second);
-        stubStatusCompleted(second);
         WireMockUpstreams.stubFor(WireMock.post(
                         WireMock.urlEqualTo("/api/v1/egress/jobs/practitioner/" + TENANT + "/" + first + "/cancel"))
                 .willReturn(WireMock.jsonResponse("{\"status\":\"cancellation_requested\"}", 202)));
@@ -458,8 +457,8 @@ class ExportLaneIT {
     @Order(4)
     void theMetricsEndpointReflectsTheThreeScenarios() {
         // The design's names as Prometheus renders them, with the labels and the values the three
-        // scenarios produced: three batches, two completions by event and one by the deadline path,
-        // one egress failure, no count mismatch. Tags render in
+        // scenarios produced: three batches, three practitioners selected for candor, two completions
+        // by event and one by the deadline path, one egress failure, no count mismatch. Tags render in
         // alphabetical order. The four names the lane did not touch here (event.rejected,
         // reconcile.mismatch, jobs.retries, jobs.final_failures) are covered by MetricsEndpointIT.
         String body =
@@ -472,6 +471,7 @@ class ExportLaneIT {
                 "vendor_export_batches_created_total{tenant=\"" + TENANT + "\",vendor=\"candor\"} 1.0",
                 "vendor_export_batches_created_total{tenant=\"" + TENANT + "\",vendor=\"lane-deadline\"} 1.0",
                 "vendor_export_batches_created_total{tenant=\"" + TENANT + "\",vendor=\"lane-retry\"} 1.0",
+                "vendor_export_selection_practitioners{tenant=\"" + TENANT + "\",vendor=\"candor\"} 3.0",
                 "vendor_export_egress_wait_seconds{tenant=\"" + TENANT + "\"}",
                 "vendor_export_egress_failed_total{reason=\"EGRESS_FAILED\",tenant=\"" + TENANT + "\"} 1.0",
                 "vendor_export_completion_source_total{source=\"EVENT\"} 2.0",

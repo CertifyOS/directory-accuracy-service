@@ -23,7 +23,8 @@ public enum BatchState {
      * <ul>
      *   <li>{@code SCHEDULED} → {@code EGRESS_REQUESTED}, {@code FAILED}
      *   <li>{@code EGRESS_REQUESTED} → {@code EGRESS_COMPLETED}, {@code EMPTY} (the saved filter
-     *       matched nobody), {@code FAILED}
+     *       matched nobody), {@code FAILED}, {@code SCHEDULED} (egress could not reuse a retry's
+     *       list after accepting it; the next attempt asks again)
      *   <li>{@code EGRESS_COMPLETED} → {@code DELIVERED}, {@code FAILED}
      *   <li>{@code DELIVERED} → {@code SUPERSEDED}
      *   <li>{@code FAILED} → {@code SCHEDULED} (operator retry asks egress again)
@@ -41,7 +42,7 @@ public enum BatchState {
     public Set<BatchState> allowedNext() {
         return switch (this) {
             case SCHEDULED -> EnumSet.of(EGRESS_REQUESTED, FAILED);
-            case EGRESS_REQUESTED -> EnumSet.of(EGRESS_COMPLETED, EMPTY, FAILED);
+            case EGRESS_REQUESTED -> EnumSet.of(EGRESS_COMPLETED, EMPTY, FAILED, SCHEDULED);
             case EGRESS_COMPLETED -> EnumSet.of(DELIVERED, FAILED);
             case DELIVERED -> EnumSet.of(SUPERSEDED);
             case FAILED -> EnumSet.of(SCHEDULED);

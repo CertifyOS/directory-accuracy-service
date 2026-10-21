@@ -170,52 +170,6 @@ public class BatchLifecycle {
         return Optional.empty();
     }
 
-    /**
-     * The saved filter matched nobody: {@code EGRESS_REQUESTED} to {@code EMPTY} with a zero
-     * selection count and {@code EXPORT_BATCH_EMPTY}. No job follows; the period is done. The caller
-     * deletes the pending deadline check.
-     *
-     * @param batch the batch
-     * @param failureReason egress's reason text
-     * @param completionSource how the outcome arrived ({@code EVENT} or {@code DEADLINE_CHECK})
-     * @param companion another event to commit with the transition (the event handler's
-     *     {@code EXPORT_EVENT_RECEIVED}), or null
-     * @param now the time of the write
-     */
-    public void markEmpty(
-            ExportBatch batch, String failureReason, String completionSource, AuditEvent companion, Instant now) {
-        Bson updates =
-                Updates.combine(Updates.set("selection.distinct", 0L), Updates.set("selection.completedAt", now));
-        AuditEvent event = AuditEvent.forBatch(
-                        AuditEventType.EXPORT_BATCH_EMPTY,
-                        batch.tenantId(),
-                        batch.vendor(),
-                        batch.id(),
-                        batch.attempt())
-                .occurredAt(now)
-                .detail("filterId", batch.selection().filterId())
-                .detail("failureReason", failureReason)
-                .detail("completionSource", completionSource)
-                .build();
-        boolean moved = transactions.run(session -> {
-            boolean ok = batches.transition(session, batch.id(), batch.state(), BatchState.EMPTY, now, updates);
-            if (ok) {
-                if (companion != null) {
-                    audit.write(session, companion);
-                }
-                audit.write(session, event);
-            }
-            return ok;
-        });
-        if (!moved) {
-            throw new IllegalStateException(batch.id() + " is no longer " + batch.state() + "; EMPTY not written");
-        }
-        metrics.selectionPractitioners(batch.tenantId(), batch.vendor(), 0);
-        LOG.infof(
-                "%s: saved filter %s matched nobody; EMPTY",
-                batch.id(), batch.selection().filterId());
-    }
-
     private void transition(ExportBatch batch, BatchState to, Bson updates, AuditEvent event, Instant now) {
         boolean moved = transactions.run(session -> {
             boolean ok = batches.transition(session, batch.id(), batch.state(), to, now, updates);

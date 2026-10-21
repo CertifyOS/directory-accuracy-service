@@ -53,7 +53,9 @@ public final class AuditDetailContract {
                 "phase",
                 "outputUri",
                 "totalRecords",
-                "totalRows");
+                "totalRows",
+                "failureReason",
+                "selectionDistinct");
         require(AuditEventType.EXPORT_EVENT_REJECTED, "messageId", "reason");
         require(AuditEventType.EXPORT_EVENT_MISSED, "check", "phaseFound", "hoursSinceRequest");
         require(AuditEventType.EXPORT_EGRESS_STALE, "check", "phaseLastSeen", "hoursWaiting");
@@ -69,6 +71,12 @@ public final class AuditDetailContract {
                 "md5");
         require(AuditEventType.EXPORT_BATCH_FAILED, "failedStep", "cause", "lastError");
         require(AuditEventType.EXPORT_RETRY_REQUESTED, "fromState", "failedStep", "newAttempt", "reason");
+        require(
+                AuditEventType.EXPORT_REUSE_REFUSED,
+                "egressCorrelationId",
+                "failureReason",
+                "completionSource",
+                "newAttempt");
         require(AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCELLED, "cancelledCorrelationId", "outcome");
         require(AuditEventType.EXPORT_PRIOR_ATTEMPT_CANCEL_REJECTED, "cancelledCorrelationId", "outcome");
         require(AuditEventType.EXPORT_BATCH_SUPERSEDED, "supersededBy", "reason");

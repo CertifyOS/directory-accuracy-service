@@ -2,6 +2,7 @@ package com.certifyos.directory_accuracy.export.events;
 
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
+import com.certifyos.directory_accuracy.clients.EgressFailureReason;
 import com.certifyos.directory_accuracy.export.batch.BatchCompletion;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
@@ -20,7 +21,9 @@ import java.util.Optional;
 import org.jboss.logging.Logger;
 
 /**
- * The completion event handler table (design step 4). Every outcome but an unexpected exception
+ * The completion event handler table (design step 4). A {@code FAILED} event's reason decides the
+ * outcome: {@code NO_MATCHING_PRACTITIONERS} ends the batch {@code EMPTY}, {@code REUSE_SOURCE_UNUSABLE}
+ * asks egress again under the next attempt, anything else fails the batch. Every outcome but an unexpected exception
  * acknowledges: Pub/Sub would redeliver anything else until the dead-letter limit, and nothing in
  * the table improves on redelivery. The state check runs first, so a redelivered or late message
  * for a batch that already moved on is a no-op; the partial unique index on {@code messageId}
@@ -59,6 +62,8 @@ public class EgressEventHandler {
         IGNORED_PHASE,
         COMPLETED,
         FAILED,
+        EMPTY,
+        REQUESTED_AGAIN,
         DUPLICATE
     }
 
@@ -129,6 +134,10 @@ public class EgressEventHandler {
                 .detail("totalRecords", event.totalRecords())
                 .detail("totalRows", event.totalRows())
                 .detail("failureMessage", event.failureMessage())
+                .detail("failureReason", failureReason(event))
+                .detail(
+                        "selectionDistinct",
+                        event.selection() == null ? null : event.selection().distinct())
                 .build();
         if (PHASE_COMPLETED.equals(event.phase())) {
             boolean moved = completion
@@ -136,7 +145,11 @@ public class EgressEventHandler {
                             batch,
                             EgressDetails.CompletionSource.EVENT,
                             new BatchCompletion.Outcome(
-                                    event.outputUri(), event.totalRecords(), event.totalRows(), event.completedAt()),
+                                    event.outputUri(),
+                                    event.totalRecords(),
+                                    event.totalRows(),
+                                    event.completedAt(),
+                                    event.selection()),
                             List.of(received),
                             now)
                     .isPresent();
@@ -144,13 +157,32 @@ public class EgressEventHandler {
         }
         if (PHASE_FAILED.equals(event.phase())) {
             String cause = event.failureMessage() == null ? "egress reported FAILED" : event.failureMessage();
-            boolean moved = completion.failed(
-                    batch, BatchState.EGRESS_REQUESTED, BatchCompletion.EGRESS_FAILED, cause, List.of(received), now);
-            return moved ? Outcome.FAILED : Outcome.STATE_PASSED;
+            String reason = failureReason(event);
+            boolean moved = completion.egressFailed(
+                    batch, reason, cause, EgressDetails.CompletionSource.EVENT, List.of(received), now, true);
+            return moved ? failedOutcome(reason) : Outcome.STATE_PASSED;
         }
         LOG.infof(
                 "egress event %s phase %s for %s acknowledged without effect",
                 message.messageId(), event.phase(), batch.id());
         return Outcome.IGNORED_PHASE;
+    }
+
+    /** The event's reason code, falling back to the selection block's when the top level has none. */
+    private static String failureReason(EgressEvent event) {
+        if (event.failureReason() != null) {
+            return event.failureReason();
+        }
+        return event.selection() == null ? null : event.selection().failureReason();
+    }
+
+    private static Outcome failedOutcome(String reason) {
+        if (EgressFailureReason.is(reason, EgressFailureReason.NO_MATCHING_PRACTITIONERS)) {
+            return Outcome.EMPTY;
+        }
+        if (EgressFailureReason.is(reason, EgressFailureReason.REUSE_SOURCE_UNUSABLE)) {
+            return Outcome.REQUESTED_AGAIN;
+        }
+        return Outcome.FAILED;
     }
 }
