@@ -41,7 +41,6 @@ class MetricsEndpointIT {
         metrics.tick(1, Duration.ofMillis(5));
         metrics.batchCreated("org-m", "candor");
         metrics.selectionPractitioners("org-m", "candor", 3);
-        metrics.selectionPage("org-m");
         metrics.egressWaitSeconds("org-m", 60);
         metrics.egressFailed("org-m", "FILE_NOT_FOUND");
         metrics.completion("DEADLINE");
@@ -58,7 +57,6 @@ class MetricsEndpointIT {
                 "vendor_export_schedules_by_state",
                 "vendor_export_batches_created_total{tenant=\"org-m\",vendor=\"candor\"}",
                 "vendor_export_selection_practitioners{tenant=\"org-m\",vendor=\"candor\"}",
-                "vendor_export_selection_pages_total{tenant=\"org-m\"}",
                 "vendor_export_egress_wait_seconds{tenant=\"org-m\"}",
                 "vendor_export_egress_failed_total{reason=\"FILE_NOT_FOUND\",tenant=\"org-m\"}",
                 "vendor_export_completion_source_total{source=\"DEADLINE\"}",

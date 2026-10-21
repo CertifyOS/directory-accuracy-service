@@ -30,7 +30,6 @@ public class DirectoryAccuracyMetrics {
     public static final String SCHEDULES_BY_STATE = "vendor_export.schedules.by_state";
     public static final String BATCHES_CREATED = "vendor_export.batches.created";
     public static final String SELECTION_PRACTITIONERS = "vendor_export.selection.practitioners";
-    public static final String SELECTION_PAGES = "vendor_export.selection.pages";
     public static final String EGRESS_WAIT_SECONDS = "vendor_export.egress.wait.seconds";
     public static final String EGRESS_FAILED = "vendor_export.egress.failed";
     public static final String COMPLETION_SOURCE = "vendor_export.completion.source";
@@ -101,15 +100,10 @@ public class DirectoryAccuracyMetrics {
         counter(BATCHES_CREATED, Tags.of("tenant", tenant, "vendor", vendor)).increment();
     }
 
-    /** Practitioners the last selection registered for the tenant and vendor. */
+    /** Distinct practitioners egress selected for the tenant and vendor's last batch (0 for an empty one). */
     public void selectionPractitioners(String tenant, String vendor, long count) {
         gauge(SELECTION_PRACTITIONERS, Tags.of("tenant", tenant, "vendor", vendor))
                 .set(count);
-    }
-
-    /** One api-layer page fetched. */
-    public void selectionPage(String tenant) {
-        counter(SELECTION_PAGES, Tags.of("tenant", tenant)).increment();
     }
 
     /** Seconds between the egress request and its completion, for the tenant's last batch. */

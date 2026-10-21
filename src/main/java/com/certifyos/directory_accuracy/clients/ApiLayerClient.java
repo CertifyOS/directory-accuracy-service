@@ -16,11 +16,10 @@ import org.jboss.resteasy.reactive.PartType;
 import org.jboss.resteasy.reactive.RestForm;
 
 /**
- * api-layer, called with this service's Auth0 machine token. Three calls from the design: the
- * practitioner list that selection pages through, the egress template read that pins a batch's
- * file definition, and the template upload that provisions a tenant's vendor template. Every call
- * names the tenant in the {@code tenant-id} header. Interface and contracts only; the first call
- * is the export lane's.
+ * api-layer, called with this service's Auth0 machine token, for the tenant's egress templates:
+ * the list and read that find and pin a batch's file definition, and the upload that provisions a
+ * tenant's vendor template. Every call names the tenant in the {@code tenant-id} header. Practitioner
+ * selection is egress's, from the schedule's saved filter; this service never lists practitioners.
  */
 @RegisterRestClient(configKey = "api-layer")
 @RegisterProvider(ApiLayerIapFilter.class)
@@ -30,26 +29,6 @@ public interface ApiLayerClient {
 
     /** The tenant header api-layer requires. */
     String TENANT_HEADER = "tenant-id";
-
-    /** api-layer's largest page. */
-    int MAX_PAGE_SIZE = 100;
-
-    /**
-     * One page of practitioners matching a filter.
-     *
-     * @param tenantId the tenant
-     * @param filter the selection criteria as api-layer's {@code filter} JSON
-     * @param page the page number, from 0
-     * @param size the page size, at most {@link #MAX_PAGE_SIZE}
-     * @return the page
-     */
-    @GET
-    @Path("/practitioners")
-    PagedPractitioners practitionerFindMany(
-            @HeaderParam(TENANT_HEADER) String tenantId,
-            @QueryParam("filter") String filter,
-            @QueryParam("page") int page,
-            @QueryParam("size") int size);
 
     /**
      * Lists a tenant's egress templates. {@code search} is a case-insensitive substring match on

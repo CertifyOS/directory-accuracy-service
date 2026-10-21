@@ -64,29 +64,6 @@ class ApiLayerClientIT {
     }
 
     @Test
-    void practitionerPageCarriesTheFilterPagingAndHeaders() {
-        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlPathEqualTo("/practitioners"))
-                .willReturn(WireMock.okJson("{\"data\":[{\"id\":\"p-1\",\"npi\":\"1234567893\",\"firstName\":\"A\"}],"
-                        + "\"totalCount\":1}")));
-        String filter = "{\"data.delegationStatus\":{\"in\":[\"Direct\"]}}";
-
-        PagedPractitioners page = apiLayer.practitionerFindMany("org-a", filter, 0, ApiLayerClient.MAX_PAGE_SIZE);
-
-        Assertions.assertEquals(1L, page.totalCount());
-        Assertions.assertEquals(
-                new PractitionerRef("p-1", "1234567893"), page.data().get(0));
-        WireMockUpstreams.verify(
-                1,
-                WireMock.getRequestedFor(WireMock.urlPathEqualTo("/practitioners"))
-                        .withHeader("Authorization", WireMock.equalTo("Bearer api-layer-token"))
-                        .withHeader(ApiLayerIapFilter.PROXY_AUTHORIZATION, WireMock.equalTo("Bearer iap-token"))
-                        .withHeader(ApiLayerClient.TENANT_HEADER, WireMock.equalTo("org-a"))
-                        .withQueryParam("filter", WireMock.equalTo(filter))
-                        .withQueryParam("page", WireMock.equalTo("0"))
-                        .withQueryParam("size", WireMock.equalTo("100")));
-    }
-
-    @Test
     void templateReadKeepsThePinnedFields() {
         WireMockUpstreams.stubFor(WireMock.get(WireMock.urlEqualTo("/api/v1/egress-templates/t-1"))
                 .willReturn(WireMock.okJson("{\"id\":\"t-1\",\"tenantId\":\"org-a\",\"templateName\":\"Candor\","
