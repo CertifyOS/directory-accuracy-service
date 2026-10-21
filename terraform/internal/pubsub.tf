@@ -8,12 +8,12 @@ locals {
 }
 
 resource "google_pubsub_topic" "dlq" {
-  name   = "vendor-exchange-egress-events-dlq"
+  name   = "vendor-export-egress-events-dlq"
   labels = local.labels
 }
 
 resource "google_pubsub_subscription" "dlq_drain" {
-  name                       = "vendor-exchange-egress-events-dlq-sub"
+  name                       = "vendor-export-egress-events-dlq-sub"
   topic                      = google_pubsub_topic.dlq.name
   message_retention_duration = "604800s"
   labels                     = local.labels
@@ -22,11 +22,11 @@ resource "google_pubsub_subscription" "dlq_drain" {
 resource "google_pubsub_subscription" "egress_events" {
   count = local.push_enabled ? 1 : 0
 
-  name                       = "vendor-exchange-egress-events"
+  name                       = "vendor-export-egress-events"
   topic                      = "projects/${local.google_project}/topics/${var.egress_events_topic}"
   ack_deadline_seconds       = 60
   message_retention_duration = "604800s"
-  filter                     = "attributes.initiator = \"vendor-exchange-worker\""
+  filter                     = "attributes.initiator = \"directory-accuracy-worker\""
   labels                     = local.labels
 
   push_config {

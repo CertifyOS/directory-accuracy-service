@@ -1,16 +1,16 @@
 # Secret containers only, never values: a value applied through Terraform lands in plaintext in
 # the state file. Add versions out of band:
-#   gcloud secrets versions add vendor-exchange-mongodb-uri            --data-file=-   (required before first boot)
-#   gcloud secrets versions add vendor-exchange-apilayer-client-secret --data-file=-   (ask A1; optional)
-#   gcloud secrets versions add vendor-exchange-sentry-dsn             --data-file=-   (optional)
+#   gcloud secrets versions add directory-accuracy-mongodb-uri            --data-file=-   (required before first boot)
+#   gcloud secrets versions add directory-accuracy-apilayer-client-secret --data-file=-   (ask A1; optional)
+#   gcloud secrets versions add directory-accuracy-sentry-dsn             --data-file=-   (optional)
 # The Mongo URI is read by the prod profile through the Secret Manager config source and the boot
 # fails without it, which is right for a required value. The two optional ones are fetched by the
 # startup script into environment variables and are simply empty while absent (decisions.md 66).
 locals {
   secrets = {
-    mongo    = "vendor-exchange-mongodb-uri"
-    apilayer = "vendor-exchange-apilayer-client-secret"
-    sentry   = "vendor-exchange-sentry-dsn"
+    mongo    = "directory-accuracy-mongodb-uri"
+    apilayer = "directory-accuracy-apilayer-client-secret"
+    sentry   = "directory-accuracy-sentry-dsn"
   }
   secret_readers = {
     for pair in setproduct(keys(local.secrets), keys(local.vm_sas)) :

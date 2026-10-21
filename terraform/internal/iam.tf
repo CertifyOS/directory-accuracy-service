@@ -2,17 +2,17 @@
 # the api group looks users up in the DAL and receives Pub/Sub pushes; the worker group calls the
 # DAL, egress, api-layer and the vendor bucket. A third account is what Pub/Sub pushes as.
 resource "google_service_account" "api" {
-  account_id   = "vendor-exchange-api"
-  display_name = "vendor-exchange-service api VMs"
+  account_id   = "directory-accuracy-api"
+  display_name = "directory-accuracy-service api VMs"
 }
 
 resource "google_service_account" "worker" {
-  account_id   = "vendor-exchange-worker"
-  display_name = "vendor-exchange-service worker VMs"
+  account_id   = "directory-accuracy-worker"
+  display_name = "directory-accuracy-service worker VMs"
 }
 
 resource "google_service_account" "push" {
-  account_id   = "vendor-exchange-pubsub-push"
+  account_id   = "directory-accuracy-pubsub-push"
   display_name = "Identity Pub/Sub pushes egress completion events with"
 }
 
@@ -43,13 +43,13 @@ resource "google_project_iam_member" "vm" {
 # Each is a DevOps ask in the plan's section 8 and in docs/runbook.md; grant by hand, then
 # codify in the certifyos-pulumi component that replaces this stack.
 #
-#   A2  roles/iap.httpsResourceAccessor on dal-service-internal for vendor-exchange-api@ and
-#       vendor-exchange-worker@; on api-service-internal for both (api-layer is behind IAP with
+#   A2  roles/iap.httpsResourceAccessor on dal-service-internal for directory-accuracy-api@ and
+#       directory-accuracy-worker@; on api-service-internal for both (api-layer is behind IAP with
 #       a Google-managed client); on the egress backend if IAP is ever enabled there.
-#   A3  roles/iam.serviceAccountTokenCreator on vendor-exchange-pubsub-push@ for the Pub/Sub
+#   A3  roles/iam.serviceAccountTokenCreator on directory-accuracy-pubsub-push@ for the Pub/Sub
 #       service agent service-106861691435@gcp-sa-pubsub.iam.gserviceaccount.com (OIDC pushes);
-#       roles/pubsub.publisher on vendor-exchange-egress-events-dlq and roles/pubsub.subscriber
-#       on vendor-exchange-egress-events for that same agent (dead lettering);
-#       roles/pubsub.subscriber on the egress-owned topic's subscription for vendor-exchange-api@.
+#       roles/pubsub.publisher on vendor-export-egress-events-dlq and roles/pubsub.subscriber
+#       on vendor-export-egress-events for that same agent (dead lettering);
+#       roles/pubsub.subscriber on the egress-owned topic's subscription for directory-accuracy-api@.
 #   A4  storage.objects.get (roles/storage.objectViewer) on gs://<vendor_bucket>/from/ for
-#       vendor-exchange-worker@.
+#       directory-accuracy-worker@.

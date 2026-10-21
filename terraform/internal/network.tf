@@ -12,12 +12,12 @@ data "google_compute_subnetwork" "svc" {
 }
 
 locals {
-  vm_tags = ["vendor-exchange-api", "vendor-exchange-worker"]
+  vm_tags = ["directory-accuracy-api", "directory-accuracy-worker"]
 }
 
 # Google's health-check and load-balancer source ranges.
 resource "google_compute_firewall" "hc" {
-  name          = "vendor-exchange-allow-hc"
+  name          = "directory-accuracy-allow-hc"
   network       = data.google_compute_network.vpc.name
   direction     = "INGRESS"
   source_ranges = ["35.191.0.0/16", "130.211.0.0/22"]
@@ -31,7 +31,7 @@ resource "google_compute_firewall" "hc" {
 
 # IAP TCP forwarding range, for `gcloud compute ssh --tunnel-through-iap` and the dashboard tunnel.
 resource "google_compute_firewall" "iap_ssh" {
-  name          = "vendor-exchange-allow-iap-ssh"
+  name          = "directory-accuracy-allow-iap-ssh"
   network       = data.google_compute_network.vpc.name
   direction     = "INGRESS"
   source_ranges = ["35.235.240.0/20"]
@@ -47,7 +47,7 @@ resource "google_compute_firewall" "iap_ssh" {
 # two allows above are the only ingress these VMs accept. The JobRunr dashboard on the worker's
 # port 8000 is therefore reachable only through an IAP SSH tunnel (make tunnel-dashboard).
 resource "google_compute_firewall" "deny_rest" {
-  name          = "vendor-exchange-deny-ingress"
+  name          = "directory-accuracy-deny-ingress"
   network       = data.google_compute_network.vpc.name
   direction     = "INGRESS"
   priority      = 65000
