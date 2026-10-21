@@ -1,6 +1,6 @@
 # HANDOFF
 
-State of `vendor-exchange-service` at the end of the export lane subtask (CP-39605), and how work on it is done. Read `AGENTS.md` first; this file says where things stand, that one says how to work.
+State of `directory-accuracy-service` at the end of the export lane subtask (CP-39605), and how work on it is done. Read `AGENTS.md` first; this file says where things stand, that one says how to work.
 
 ## Where things stand (2026-10-06, end of CP-40438)
 
@@ -12,7 +12,7 @@ State of `vendor-exchange-service` at the end of the export lane subtask (CP-396
 
 ## What is deliberately not done here
 
-- Nothing in the lane is a stub any more. What remains is outside this repository: the egress changes the design asks for, the Auth0 machine client, the IAP grants, the bucket read grant, the Pub/Sub topic and bindings, the Pulumi deployment (which also builds alerts E1 to E11 and a dashboard from runbook section 10, by Dev's decision of 2026-10-06 not to keep GCP resource definitions in this repository), the design-doc edits (ask A9, grown by `PRIOR_ATTEMPT` as a completion source, `userId vendor-exchange-worker`, the tick's 200, the file date being the first request's date, `scheduleVersion` and `md5` on two events, the aligned cancel-event keys).
+- Nothing in the lane is a stub any more. What remains is outside this repository: the egress changes the design asks for, the Auth0 machine client, the IAP grants, the bucket read grant, the Pub/Sub topic and bindings, the Pulumi deployment (which also builds alerts E1 to E11 and a dashboard from runbook section 10, by Dev's decision of 2026-10-06 not to keep GCP resource definitions in this repository), the design-doc edits (ask A9, grown by `PRIOR_ATTEMPT` as a completion source, `userId directory-accuracy-worker`, the tick's 200, the file date being the first request's date, `scheduleVersion` and `md5` on two events, the aligned cancel-event keys).
 - The mappings CSV ships with the open columns the design leaves open (`practitioner_phone`, `telehealth_url`, the group join, `Y/N` rendering) as documented placeholders (finding 69); a resolved vendor contract is a v2 of the CSV and a new template version, no code change.
 - Phase 2, ingesting the vendor's response, is the next subtask under CP-39602 (CP-40438) and starts from `acknowledgedAt` and `inboundBatchId` on the batch document, which this lane only defines.
 

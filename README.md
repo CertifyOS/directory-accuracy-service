@@ -1,6 +1,6 @@
-# vendor-exchange-service
+# directory-accuracy-service
 
-Directory accuracy vendor exchange. Phase 1 selects practitioners per tenant on a schedule, asks the egress service to build the vendor file, and records what was sent. Phase 2 ingests the vendor's response in the same service.
+The directory accuracy service: vendor export and vendor ingestion as modules of one service. Phase 1 selects practitioners per tenant on a schedule, asks the egress service to build the vendor file, and records what was sent. Phase 2 ingests the vendor's response in the same service.
 
 - Design: Confluence "CP-39602 - Design: Directory accuracy vendor export".
 - Working rules: `AGENTS.md` (the one guidance file; every rule there is enforced by a lint or a test).
@@ -9,7 +9,7 @@ Directory accuracy vendor exchange. Phase 1 selects practitioners per tenant on 
 
 ## Shape
 
-One image, two roles chosen by Quarkus profile. `prod,api` serves HTTP behind the load balancer: operator endpoints under `/v1/vendor-exports`, the Pub/Sub push endpoint under `/internal`, health and metrics under `/q`. `prod,worker` runs the JobRunr job server and dashboard and takes no inbound traffic. Both roles share one MongoDB database, `vendor_exchange`, which holds the four service collections and JobRunr's five `jobrunr_` collections.
+One image, two roles chosen by Quarkus profile. `prod,api` serves HTTP behind the load balancer: operator endpoints under `/v1/vendor-exports`, the Pub/Sub push endpoint under `/internal`, health and metrics under `/q`. `prod,worker` runs the JobRunr job server and dashboard and takes no inbound traffic. Both roles share one MongoDB database, `directory_accuracy`, which holds the four service collections and JobRunr's five `jobrunr_` collections.
 
 ```
 export lane        tick (06:00 UTC) or run-now -> SelectJob -> RequestEgressJob -> completion event or DeadlineCheckJob -> FinishJob
@@ -73,14 +73,14 @@ make deploy        # push, write terraform/internal/image.auto.tfvars, apply tem
 ## Layout
 
 ```
-src/main/java/com/certifyos/vendor_exchange/
-  config/       VendorExchangeConfig (closed mapping), RoleProfileCheck, MongoIndexes, Clocks
+src/main/java/com/certifyos/directory_accuracy/
+  config/       DirectoryAccuracyConfig (closed mapping), RoleProfileCheck, MongoIndexes, Clocks
   persistence/  Collections, Transactions, Documents, Ids, AlreadyExistsException
   audit/        AuditEvent, AuditEventType (24 types), AuditDetailContract (required detail per type), AuditRepository, Actors
   auth/         UserContextFilter, PermissionFilter, DalUserClient, Google ID tokens, push token verifier
   http/         Problem (RFC 9457), Problems, ProblemException, ProblemMappers
   clients/      EgressClient, ApiLayerClient, ApiLayerTokenService, VendorBucket (GCS metadata), readiness
-  metrics/      VendorExchangeMetrics (the design's names)
+  metrics/      DirectoryAccuracyMetrics (the design's names)
   export/
     schedule/   ScheduleResource and ScheduleService, SelectionSchema, Cadence, TemplateProvisioner (+ the mappings CSV)
     batch/      ExportBatch and ExportNpi with their repositories, BatchLifecycle (birth, selection, request),

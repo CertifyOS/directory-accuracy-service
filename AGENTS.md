@@ -1,12 +1,12 @@
-# AGENTS.md — vendor-exchange-service
+# AGENTS.md — directory-accuracy-service
 
 The one guidance file for coding agents and people. Other tool files point here. Every rule below is enforced by a lint or a test, or says which file enforces it; a rule that cannot be enforced is not listed.
 
 ## What this service is
 
-- Directory accuracy vendor exchange: scheduled practitioner export to an accuracy vendor (phase 1), ingestion of the vendor's response (phase 2). Design: Confluence "CP-39602 - Design: Directory accuracy vendor export". Plan: `cos-docs/directory-accuracy/vendor-export/scaffolding-implementation-plan.md`.
+- The directory accuracy service: scheduled practitioner export to an accuracy vendor (phase 1), ingestion of the vendor's response (phase 2). Design: Confluence "CP-39602 - Design: Directory accuracy vendor export". Plan: `cos-docs/directory-accuracy/vendor-export/scaffolding-implementation-plan.md`.
 - One image, two roles by Quarkus profile: `api` (HTTP behind the load balancer) and `worker` (JobRunr server, no inbound traffic). `RoleProfileCheck` refuses to boot with neither or both.
-- Quarkus 3.33.4, JobRunr 8.8.2, MongoDB database `vendor_exchange`, Java 21. Imperative code only (blocking Mongo driver, JobRunr); no Mutiny.
+- Quarkus 3.33.4, JobRunr 8.8.2, MongoDB database `directory_accuracy`, Java 21. Imperative code only (blocking Mongo driver, JobRunr); no Mutiny.
 
 ## Layout (ArchitectureTest enforces the dependency rules)
 
@@ -30,15 +30,15 @@ The one guidance file for coding agents and people. Other tool files point here.
 
 ## Rules the code and config carry
 
-- Config is one closed `@ConfigMapping`, `VendorExchangeConfig`. Required infrastructure values have no default. Swap-in points are `Optional` and map to `${ENV:}`; empty reads as absent.
+- Config is one closed `@ConfigMapping`, `DirectoryAccuracyConfig`. Required infrastructure values have no default. Swap-in points are `Optional` and map to `${ENV:}`; empty reads as absent.
 - HTTP policy is deny by default; `/q/*` and `/internal/*` are permitted and guarded elsewhere; operator endpoints live under `/v1/` and require a platform token.
 - Every batch state change is a compare-and-set on `state` inside a Mongo transaction, with its audit event in the same transaction. Nothing outside MongoDB (an enqueue, a publish) ever runs inside `Transactions.run`.
 - Every repository method takes the tenant or an id that embeds it; every list query carries a limit.
 - Logs carry ids and counts, never bodies, DTOs, bound values or PII. Job code opens `export/jobs/JobLogContext` first, so every line carries `exportBatchId`, `tenantId` and `jobId` on the MDC.
-- Metrics are the design's names only, through `metrics/VendorExchangeMetrics`; tags are tenant, vendor, state, reason, source, status, disposition, action, result, outcome, eventType or job, never a practitioner, an NPI, a location or a field value. Database-backed gauges go through `registerGauge` with a cached supplier (`export/ExportStateGauges`).
+- Metrics are the design's names only, through `metrics/DirectoryAccuracyMetrics`; tags are tenant, vendor, state, reason, source, status, disposition, action, result, outcome, eventType or job, never a practitioner, an NPI, a location or a field value. Database-backed gauges go through `registerGauge` with a cached supplier (`export/ExportStateGauges`).
 - Error responses are RFC 9457 problem+json with a stable `code` (`http/Problem`), rendered only by `http/ProblemMappers` and the auth filters' aborts through `http/Problems`. Resources throw; nothing builds an error body by hand.
 - Outbound identity: `auth/GoogleIdTokenService` mints one Google ID token per IAP audience (`DalAuthFilter`, `clients/EgressAuthFilter`); `clients/ApiLayerTokenService` holds the Auth0 machine token (`ApiLayerAuthFilter`) and reports "not configured" on readiness until the client exists. REST client interfaces in `clients/` carry typed records only; the tenant header is a method parameter, never ambient state.
-- Inbound auth: the HTTP policy requires a platform token on `/v1/*`; `auth/UserContextFilter` requires `tenant-id` and a role in that tenant (DAL lookup, cached by email); `auth/PermissionFilter` checks `@RequiresPermission` only when `vendor-exchange.permissions.enforce` is true. `/internal/*` is guarded by `auth/PubSubPushAuthFilter` (Google OIDC push token), closed with 401 until the push settings exist.
+- Inbound auth: the HTTP policy requires a platform token on `/v1/*`; `auth/UserContextFilter` requires `tenant-id` and a role in that tenant (DAL lookup, cached by email); `auth/PermissionFilter` checks `@RequiresPermission` only when `directory-accuracy.permissions.enforce` is true. `/internal/*` is guarded by `auth/PubSubPushAuthFilter` (Google OIDC push token), closed with 401 until the push settings exist.
 
 ## Working
 

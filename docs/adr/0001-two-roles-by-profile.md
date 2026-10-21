@@ -10,7 +10,7 @@ The service has two halves with different shapes. The api half is small, request
 
 - One container image. The role is the active Quarkus profile: `QUARKUS_PROFILE=prod,api` or `prod,worker`. `RoleProfileCheck` throws at startup unless exactly one is active.
 - `%worker` is the only profile that enables the JobRunr background server and dashboard. `%api` keys are added only when the api role needs something the worker must not have.
-- Two regional managed instance groups from one instance template per role: `vendor-exchange-api` (autoscaled, behind an external HTTPS load balancer) and `vendor-exchange-worker` (fixed size, opportunistic updates, proactive rollout by hand after a drain).
+- Two regional managed instance groups from one instance template per role: `directory-accuracy-api` (autoscaled, behind an external HTTPS load balancer) and `directory-accuracy-worker` (fixed size, opportunistic updates, proactive rollout by hand after a drain).
 - Two service accounts, one per group, with the least privilege each role needs.
 
 ## Consequences
