@@ -158,6 +158,8 @@ public class AuditRepositoryIT {
                 .detail("outputUri", null)
                 .detail("totalRecords", null)
                 .detail("totalRows", null)
+                .detail("failureReason", null)
+                .detail("selectionDistinct", null)
                 .build();
     }
 
@@ -215,7 +217,7 @@ public class AuditRepositoryIT {
                 .occurredAt(NOW.minusSeconds(600))
                 .detail("cadence", "monthly")
                 .detail("timezone", "UTC")
-                .detail("selection", "s")
+                .detail("filterId", "flt-1")
                 .detail("egressTemplateId", "tpl")
                 .detail("nextDueAt", NOW)
                 .build());

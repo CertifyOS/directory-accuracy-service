@@ -95,6 +95,8 @@ class AuditDetailContractTest {
                 .detail("outputUri", null)
                 .detail("totalRecords", null)
                 .detail("totalRows", null)
+                .detail("failureReason", "FILTER_NOT_USABLE")
+                .detail("selectionDistinct", null)
                 .build();
         Assertions.assertFalse(event.detail().containsKey("outputUri"));
         Assertions.assertEquals("FAILED", event.detail().get("phase"));

@@ -167,7 +167,7 @@ class AuditReadIT {
                 .occurredAt(Instant.parse("2026-10-01T06:00:00Z"))
                 .detail("cadence", "monthly")
                 .detail("timezone", "UTC")
-                .detail("selection", "s")
+                .detail("filterId", "flt-1")
                 .detail("egressTemplateId", "tpl-1")
                 .detail("nextDueAt", "n")
                 .build());
@@ -180,7 +180,9 @@ class AuditReadIT {
         audit.write(AuditEvent.forBatch(
                         AuditEventType.EXPORT_BATCH_EMPTY, TENANT, "sched", TENANT + "-sched-2026-10-001", 1)
                 .occurredAt(Instant.parse("2026-10-01T06:06:00Z"))
-                .detail("criteria", "c")
+                .detail("filterId", "flt-1")
+                .detail("failureReason", "NO_MATCHING_PRACTITIONERS")
+                .detail("completionSource", "EVENT")
                 .build());
 
         member().get("/v1/vendor-exports/schedules/" + TENANT + "/sched/events")
