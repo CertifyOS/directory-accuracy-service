@@ -302,6 +302,80 @@ class RequestEgressJobIT {
     }
 
     @Test
+    void aNewAttemptClearsTheEarlierAttemptsSelectionCounts() {
+        String tenant = "req-stale";
+        String batchId = tenant + "-candor-2026-10-001";
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        transactions.run(session -> batches.updateInState(
+                session,
+                batch.id(),
+                BatchState.SCHEDULED,
+                Instant.now(),
+                Updates.combine(
+                        Updates.set("selection.distinct", 1240L),
+                        Updates.set("selection.listUsedUri", "gs://egress-list-used/r1.csv"))));
+        stubCancelAccepted(tenant, batchId + "-r1");
+        stubExportAccepted(tenant, batchId + "-r2");
+
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
+        Assertions.assertNull(after.selection().distinct(), "attempt 1's count never stands in for attempt 2's");
+        Assertions.assertNull(after.selection().listUsedUri());
+        Assertions.assertEquals(FILTER_ID, after.selection().filterId());
+    }
+
+    @Test
+    void aConflictOnAReuseAsksEgressWhichSelectionItHolds() {
+        String tenant = "req-held";
+        String batchId = tenant + "-candor-2026-10-001";
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        stubCancelAccepted(tenant, batchId + "-r1");
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
+                .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
+                .willReturn(WireMock.jsonResponse("{\"error\":\"job exists\"}", 409)));
+        WireMockUpstreams.stubFor(WireMock.get(
+                        WireMock.urlEqualTo("/api/v1/egress/status/practitioner/" + tenant + "/" + batchId + "-r2"))
+                .willReturn(WireMock.okJson("{\"state\":\"RUNNING\",\"phase\":\"SEEDING\","
+                        + "\"selection\":{\"source\":\"SAVED_FILTER\",\"state\":\"RESOLVING\",\"reusedFrom\":null}}")));
+
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
+        Assertions.assertEquals(
+                Boolean.TRUE, after.selection().reEvaluated(), "the earlier run's filter request is what egress holds");
+        AuditEvent requested = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_EGRESS_REQUESTED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertFalse(requested.detail().containsKey("reuseSelectionFrom"));
+    }
+
+    @Test
+    void aConflictOnAReuseEgressHeldAsAReuseStaysAReuse() {
+        String tenant = "req-held-reuse";
+        String batchId = tenant + "-candor-2026-10-001";
+        ExportBatch batch = scheduled(tenant, 2, pinned(tenant, batchId, batchId + "-r1"));
+        stubCancelAccepted(tenant, batchId + "-r1");
+        WireMockUpstreams.stubFor(WireMock.post(WireMock.urlEqualTo(EXPORT))
+                .withHeader("X-Forwarding-Tenant-Id", WireMock.equalTo(tenant))
+                .willReturn(WireMock.jsonResponse("{\"error\":\"job exists\"}", 409)));
+        WireMockUpstreams.stubFor(WireMock.get(
+                        WireMock.urlEqualTo("/api/v1/egress/status/practitioner/" + tenant + "/" + batchId + "-r2"))
+                .willReturn(WireMock.okJson("{\"state\":\"RUNNING\",\"phase\":\"SEEDING\","
+                        + "\"selection\":{\"source\":\"REUSE\",\"state\":\"RESOLVED\",\"reusedFrom\":\""
+                        + batchId + "-r1\"}}")));
+
+        job.run(new RequestEgressJobRequest(batch.id(), 2, 0));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EGRESS_REQUESTED, after.state());
+        Assertions.assertNull(after.selection().reEvaluated());
+    }
+
+    @Test
     void aReuseEgressCannotServeIsSentAgainWithTheFilter() {
         String tenant = "req-reuse-gone";
         String batchId = tenant + "-candor-2026-10-001";

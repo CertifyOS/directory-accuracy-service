@@ -6,6 +6,8 @@ import com.certifyos.directory_accuracy.clients.EgressClient;
 import com.certifyos.directory_accuracy.clients.EgressError;
 import com.certifyos.directory_accuracy.clients.EgressExportRequest;
 import com.certifyos.directory_accuracy.clients.EgressExportResponse;
+import com.certifyos.directory_accuracy.clients.EgressSelection;
+import com.certifyos.directory_accuracy.clients.EgressStatusResponse;
 import com.certifyos.directory_accuracy.clients.EgressTemplate;
 import com.certifyos.directory_accuracy.clients.VendorBucket;
 import com.certifyos.directory_accuracy.export.batch.BatchCompletion;
@@ -56,6 +58,9 @@ public class RequestEgressJob implements JobRequestHandler<RequestEgressJobReque
 
     /** Waits for egress's selection quota before the refusal is left to JobRunr's retries. */
     static final int MAX_QUOTA_WAITS = 12;
+
+    /** The answer recorded when egress already holds the correlation id. */
+    static final String ALREADY_HELD = "409 already exists";
 
     /** Egress's fixed {@code Retry-After}, used when the header is missing or unreadable. */
     static final Duration DEFAULT_RETRY_AFTER = Duration.ofSeconds(300);
@@ -133,6 +138,7 @@ public class RequestEgressJob implements JobRequestHandler<RequestEgressJobReque
         if (sent.outcome() != Outcome.ACCEPTED) {
             return;
         }
+        selection = heldSelection(batch, correlationId, selection, sent);
         Instant deadlineAt = now.plus(Duration.ofHours(support.config().egress().deadlineHours()));
         lifecycle.egressRequested(
                 batch,
@@ -142,6 +148,27 @@ public class RequestEgressJob implements JobRequestHandler<RequestEgressJobReque
                 sent.answer(),
                 deadlineAt,
                 now);
+    }
+
+    /**
+     * The selection egress holds for this correlation id. Egress answers {@code 409} for a known id
+     * before it looks at the selection, so a JobRunr re-run whose first run had its reuse refused and
+     * the filter accepted gets {@code 409} for the reuse body. One status call says which it was:
+     * a selection with no {@code reusedFrom} was evaluated from the filter.
+     */
+    private EgressExportRequest.Selection heldSelection(
+            ExportBatch batch, String correlationId, EgressExportRequest.Selection sent, Sent answer) {
+        if (!ALREADY_HELD.equals(answer.answer()) || sent.reuseSelectionFrom() == null) {
+            return sent;
+        }
+        EgressSelection held = Optional.ofNullable(egress.status(batch.tenantId(), batch.tenantId(), correlationId))
+                .map(EgressStatusResponse::selection)
+                .orElse(null);
+        if (held != null && held.reusedFrom() == null) {
+            LOG.infof("%s: egress already holds %s, evaluated from the filter", batch.id(), correlationId);
+            return EgressExportRequest.Selection.savedFilter(batch.selection().filterId());
+        }
+        return sent;
     }
 
     /** What one export call came to. */
@@ -227,7 +254,7 @@ public class RequestEgressJob implements JobRequestHandler<RequestEgressJobReque
         } catch (WebApplicationException refused) {
             if (status(refused) == 409) {
                 LOG.infof("%s: egress already holds %s; treated as accepted", batch.id(), request.correlationId());
-                return new Sent(Outcome.ACCEPTED, "409 already exists");
+                return new Sent(Outcome.ACCEPTED, ALREADY_HELD);
             }
             return refused(batch, request, quotaWait, refused);
         }

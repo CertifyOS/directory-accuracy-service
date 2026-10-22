@@ -241,7 +241,8 @@ public class BatchLifecycle {
      * with the correlation id, job reference, request time and the deadline job id, plus
      * {@code EXPORT_EGRESS_REQUESTED}; then the first deadline check is scheduled. A retry that sent
      * the filter id rather than {@code reuseSelectionFrom} could not reuse the earlier list, and
-     * the batch records {@code selection.reEvaluated}.
+     * the batch records {@code selection.reEvaluated}. An earlier attempt's selection counts are
+     * cleared: this attempt's arrive with its completion.
      *
      * @param batch the batch, pinned
      * @param correlationId this attempt's egress correlation id
@@ -268,7 +269,16 @@ public class BatchLifecycle {
                 Updates.set("egress.deadlineJobId", deadlineJobId.toString()),
                 Updates.unset("egress.completedAt"),
                 Updates.unset("egress.completionSource"),
-                reEvaluated ? Updates.set("selection.reEvaluated", true) : Updates.unset("selection.reEvaluated"));
+                reEvaluated ? Updates.set("selection.reEvaluated", true) : Updates.unset("selection.reEvaluated"),
+                // A new attempt's counts come from its own completion; an earlier attempt's would
+                // otherwise stand in for them when the event carries no selection block.
+                Updates.unset("selection.requested"),
+                Updates.unset("selection.distinct"),
+                Updates.unset("selection.unmatched"),
+                Updates.unset("selection.parts"),
+                Updates.unset("selection.reusedFrom"),
+                Updates.unset("selection.listUsedUri"),
+                Updates.unset("selection.completedAt"));
         AuditEvent event = AuditEvent.forBatch(
                         AuditEventType.EXPORT_EGRESS_REQUESTED,
                         batch.tenantId(),
