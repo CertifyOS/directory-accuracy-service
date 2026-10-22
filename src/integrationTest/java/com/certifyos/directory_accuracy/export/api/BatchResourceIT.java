@@ -11,11 +11,9 @@ import com.certifyos.directory_accuracy.auth.WireMockDal;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
 import com.certifyos.directory_accuracy.export.jobs.RequestEgressJob;
-import com.certifyos.directory_accuracy.export.jobs.SelectJob;
 import com.certifyos.directory_accuracy.export.schedule.Cadence;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
@@ -59,9 +57,6 @@ class BatchResourceIT {
     ExportBatchRepository batches;
 
     @Inject
-    ExportNpiRepository npis;
-
-    @Inject
     ScheduleRepository schedules;
 
     @Inject
@@ -90,7 +85,6 @@ class BatchResourceIT {
         return EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 tenant,
                 vendor,
                 state,
@@ -98,41 +92,16 @@ class BatchResourceIT {
                 Instant.now().minusSeconds(3600));
     }
 
-    private ExportBatch failedAt(String vendor, ExportBatch.FailedStep step) {
-        ExportBatch batch = step == ExportBatch.FailedStep.SELECT
-                ? EgressFixtures.batchIn(
-                        transactions, batches, npis, TENANT, vendor, BatchState.NPIS_SELECTED, 0, Instant.now())
-                : batch(TENANT, vendor, BatchState.EGRESS_REQUESTED, 2);
+    private ExportBatch failedAt(String vendor) {
+        ExportBatch batch = batch(TENANT, vendor, BatchState.EGRESS_REQUESTED, 2);
         transactions.run(session -> {
-            BatchState from =
-                    step == ExportBatch.FailedStep.SELECT ? BatchState.NPIS_SELECTED : BatchState.EGRESS_REQUESTED;
-            if (step == ExportBatch.FailedStep.SELECT) {
-                // the fixture cannot stop at SCHEDULED with details set; walk back through FAILED instead
-                batches.transition(
-                        session,
-                        batch.id(),
-                        from,
-                        BatchState.FAILED,
-                        Instant.now(),
-                        Updates.combine(Updates.set("failedStep", "SELECT"), Updates.set("lastError", "boom")));
-                batches.transition(session, batch.id(), BatchState.FAILED, BatchState.SCHEDULED, Instant.now(), null);
-                batches.transition(
-                        session,
-                        batch.id(),
-                        BatchState.SCHEDULED,
-                        BatchState.FAILED,
-                        Instant.now(),
-                        Updates.combine(Updates.set("failedStep", "SELECT"), Updates.set("lastError", "boom")));
-            } else {
-                batches.transition(
-                        session,
-                        batch.id(),
-                        from,
-                        BatchState.FAILED,
-                        Instant.now(),
-                        Updates.combine(
-                                Updates.set("failedStep", "EGRESS"), Updates.set("lastError", "egress said no")));
-            }
+            batches.transition(
+                    session,
+                    batch.id(),
+                    BatchState.EGRESS_REQUESTED,
+                    BatchState.FAILED,
+                    Instant.now(),
+                    Updates.combine(Updates.set("failedStep", "EGRESS"), Updates.set("lastError", "egress said no")));
             return null;
         });
         return batches.find(batch.id()).orElseThrow();
@@ -149,7 +118,8 @@ class BatchResourceIT {
                 .body("id", Matchers.equalTo(batch.id()))
                 .body("state", Matchers.equalTo("EGRESS_REQUESTED"))
                 .body("attempt", Matchers.equalTo(1))
-                .body("selection.criteria.'data.delegationStatus'.in", Matchers.contains("Direct"))
+                .body("selection.filterId", Matchers.equalTo(EgressFixtures.FILTER_ID))
+                .body("selection.distinct", Matchers.nullValue())
                 .body("egress.correlationId", Matchers.equalTo(batch.egress().correlationId()))
                 .body(
                         "egress.destination.objectName",
@@ -172,7 +142,6 @@ class BatchResourceIT {
                 .post(BASE + "/" + theirs.id() + "/retry")
                 .then()
                 .statusCode(404);
-        member().get(BASE + "/" + theirs.id() + "/npis").then().statusCode(404);
     }
 
     @Test
@@ -200,73 +169,8 @@ class BatchResourceIT {
     @Test
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "batch@certifyos.com")})
-    void npisAreKeysetPagedByNpi() {
-        ExportBatch batch = batch(TENANT, "npis", BatchState.EGRESS_REQUESTED, 5);
-        String first = member().get(BASE + "/" + batch.id() + "/npis?limit=2")
-                .then()
-                .statusCode(200)
-                .body("items.size()", Matchers.equalTo(2))
-                .body("items[0].npi", Matchers.equalTo("1000000000"))
-                .body("items[0].certifyPractitionerId", Matchers.equalTo("p-0"))
-                .body("nextAfter", Matchers.equalTo("1000000001"))
-                .extract()
-                .path("nextAfter");
-        String second = member().get(BASE + "/" + batch.id() + "/npis?limit=2&after=" + first)
-                .then()
-                .statusCode(200)
-                .body("items.npi", Matchers.contains("1000000002", "1000000003"))
-                .extract()
-                .path("nextAfter");
-        member().get(BASE + "/" + batch.id() + "/npis?limit=2&after=" + second)
-                .then()
-                .statusCode(200)
-                .body("items.npi", Matchers.contains("1000000004"))
-                .body("nextAfter", Matchers.nullValue());
-        member().get(BASE + "/" + batch.id() + "/npis?limit=0")
-                .then()
-                .statusCode(400)
-                .body("code", Matchers.equalTo("INVALID_REQUEST"));
-    }
-
-    @Test
-    @TestSecurity(user = "ops")
-    @JwtSecurity(claims = {@Claim(key = EMAIL, value = "batch@certifyos.com")})
-    void retryFromFailedSelectGoesBackToScheduledWithASelectJobAtAttemptTwo() {
-        ExportBatch failed = failedAt("retry-sel", ExportBatch.FailedStep.SELECT);
-        UUID expectedJob = JobIds.of(SelectJob.NAME, failed.id(), 2);
-
-        member().body("{\"reason\":\"api-layer is back\"}")
-                .post(BASE + "/" + failed.id() + "/retry")
-                .then()
-                .statusCode(202)
-                .body("exportBatchId", Matchers.equalTo(failed.id()))
-                .body("attempt", Matchers.equalTo(2))
-                .body("jobId", Matchers.equalTo(expectedJob.toString()));
-
-        ExportBatch after = batches.find(failed.id()).orElseThrow();
-        Assertions.assertEquals(BatchState.SCHEDULED, after.state());
-        Assertions.assertEquals(2, after.attempt());
-        Assertions.assertNull(after.failedStep());
-        Assertions.assertNull(after.lastError());
-        Assertions.assertEquals(
-                StateName.ENQUEUED, storage.getJobById(expectedJob).getState());
-        AuditEvent event = audit.findForBatch(failed.id(), 20).stream()
-                .filter(found -> found.type() == AuditEventType.EXPORT_RETRY_REQUESTED)
-                .findFirst()
-                .orElseThrow();
-        Assertions.assertEquals("batch@certifyos.com", event.actor());
-        Assertions.assertEquals("FAILED", event.detail().get("fromState"));
-        Assertions.assertEquals("SELECT", event.detail().get("failedStep"));
-        Assertions.assertEquals(2, event.detail().get("newAttempt"));
-        Assertions.assertEquals("api-layer is back", event.detail().get("reason"));
-        Assertions.assertEquals(2, event.attempt());
-    }
-
-    @Test
-    @TestSecurity(user = "ops")
-    @JwtSecurity(claims = {@Claim(key = EMAIL, value = "batch@certifyos.com")})
-    void retryFromFailedEgressGoesBackToNpisSelectedWithAnEgressRequestJob() {
-        ExportBatch failed = failedAt("retry-egr", ExportBatch.FailedStep.EGRESS);
+    void retryGoesBackToScheduledWithAnEgressRequestJobAtAttemptTwo() {
+        ExportBatch failed = failedAt("retry-egr");
         UUID expectedJob = JobIds.of(RequestEgressJob.NAME, failed.id(), 2);
 
         member().body("{\"reason\":\"egress fixed\"}")
@@ -277,13 +181,63 @@ class BatchResourceIT {
                 .body("jobId", Matchers.equalTo(expectedJob.toString()));
 
         ExportBatch after = batches.find(failed.id()).orElseThrow();
-        Assertions.assertEquals(BatchState.NPIS_SELECTED, after.state());
+        Assertions.assertEquals(BatchState.SCHEDULED, after.state());
+        Assertions.assertEquals(2, after.attempt());
+        Assertions.assertNull(after.failedStep());
+        Assertions.assertNull(after.lastError());
         Assertions.assertEquals(
                 failed.egress().correlationId(),
                 after.egress().correlationId(),
-                "the prior correlation stays for the cancel");
+                "the prior correlation stays for the cancel and the reuse");
+        Assertions.assertEquals(
+                EgressFixtures.FILTER_ID, after.selection().filterId(), "no schedule, the batch's id stays");
         Assertions.assertEquals(
                 StateName.ENQUEUED, storage.getJobById(expectedJob).getState());
+        AuditEvent event = audit.findForBatch(failed.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_RETRY_REQUESTED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals("batch@certifyos.com", event.actor());
+        Assertions.assertEquals("FAILED", event.detail().get("fromState"));
+        Assertions.assertEquals("EGRESS", event.detail().get("failedStep"));
+        Assertions.assertEquals(2, event.detail().get("newAttempt"));
+        Assertions.assertEquals("egress fixed", event.detail().get("reason"));
+        Assertions.assertEquals(2, event.attempt());
+    }
+
+    @Test
+    @TestSecurity(user = "ops")
+    @JwtSecurity(claims = {@Claim(key = EMAIL, value = "batch@certifyos.com")})
+    void retryTakesTheSchedulesCurrentFilterId() {
+        ExportBatch failed = failedAt("retry-fix");
+        Schedule fixed = Schedule.create(
+                TENANT,
+                "retry-fix",
+                Cadence.monthly(1),
+                ZoneId.of("UTC"),
+                "flt-fixed",
+                "tpl-1",
+                Instant.now().plusSeconds(86400),
+                "user:ops",
+                Instant.now());
+        transactions.run(session -> {
+            schedules.insert(session, fixed);
+            return null;
+        });
+
+        member().body("{\"reason\":\"filter id fixed on the schedule\"}")
+                .post(BASE + "/" + failed.id() + "/retry")
+                .then()
+                .statusCode(202);
+
+        ExportBatch after = batches.find(failed.id()).orElseThrow();
+        Assertions.assertEquals("flt-fixed", after.selection().filterId());
+        AuditEvent event = audit.findForBatch(failed.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_RETRY_REQUESTED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals("flt-fixed", event.detail().get("filterId"));
+        Assertions.assertEquals(EgressFixtures.FILTER_ID, event.detail().get("filterIdBefore"));
     }
 
     @Test
@@ -296,7 +250,7 @@ class BatchResourceIT {
                 .then()
                 .statusCode(409)
                 .body("code", Matchers.equalTo("RETRY_NOT_ALLOWED"));
-        ExportBatch failed = failedAt("retry-noreason", ExportBatch.FailedStep.EGRESS);
+        ExportBatch failed = failedAt("retry-noreason");
         member().body("{}")
                 .post(BASE + "/" + failed.id() + "/retry")
                 .then()
@@ -315,7 +269,7 @@ class BatchResourceIT {
                 "candor",
                 Cadence.monthly(1),
                 ZoneId.of("UTC"),
-                EgressFixtures.CRITERIA,
+                EgressFixtures.FILTER_ID,
                 "tpl-1",
                 Instant.now().plusSeconds(86400),
                 "user:ops",
@@ -333,7 +287,7 @@ class BatchResourceIT {
             return null;
         });
         String newId = TENANT + "-candor-2026-10-002";
-        UUID expectedJob = JobIds.of(SelectJob.NAME, newId, 1);
+        UUID expectedJob = JobIds.of(RequestEgressJob.NAME, newId, 1);
 
         member().body("{\"reason\":\"wrong template version\"}")
                 .post(BASE + "/" + delivered.id() + "/supersede")
@@ -385,7 +339,7 @@ class BatchResourceIT {
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "batch@certifyos.com")})
     void supersedeIsRefusedOutsideDelivered() {
-        ExportBatch failed = failedAt("sup-no", ExportBatch.FailedStep.EGRESS);
+        ExportBatch failed = failedAt("sup-no");
         member().body("{\"reason\":\"x\"}")
                 .post(BASE + "/" + failed.id() + "/supersede")
                 .then()

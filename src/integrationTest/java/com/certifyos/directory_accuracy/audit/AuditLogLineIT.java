@@ -54,11 +54,11 @@ class AuditLogLineIT {
                 .detail("waitSeconds", 42)
                 .detail("completionSource", "DEADLINE")
                 .build());
-        audit.writeIdempotent(AuditEvent.forBatch(AuditEventType.NPIS_REGISTERED, "log-line", "candor", batchId, 1)
-                .detail("page", 0)
-                .detail("count", 1)
+        audit.writeIdempotent(AuditEvent.forBatch(AuditEventType.EXPORT_RECONCILED, "log-line", "candor", batchId, 1)
+                .detail("selected", 1L)
+                .detail("inFile", 1L)
+                .detail("match", true)
                 .detail("firstNpi", "1234567893")
-                .detail("lastNpi", "1234567893")
                 .build());
         audit.write(AuditEvent.of(AuditEventType.EXPORT_EVENT_REJECTED, null, null)
                 .detail("messageId", "m-9")
@@ -77,7 +77,7 @@ class AuditLogLineIT {
                                 + batchId + " attempt=1 actor=system:vendor-export"),
                 lines.get(0));
         Assertions.assertTrue(lines.get(0).endsWith(" completionSource=DEADLINE"), lines.get(0));
-        Assertions.assertTrue(lines.get(1).startsWith("AUDIT type=NPIS_REGISTERED"), lines.get(1));
+        Assertions.assertTrue(lines.get(1).startsWith("AUDIT type=EXPORT_RECONCILED"), lines.get(1));
         Assertions.assertTrue(
                 lines.get(2).contains("tenantId=null vendor=null exportBatchId=null")
                         && lines.get(2).endsWith(" reason=UNKNOWN_SCHEMA"),

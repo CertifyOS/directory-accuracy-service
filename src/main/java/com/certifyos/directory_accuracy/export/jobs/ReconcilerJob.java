@@ -16,10 +16,10 @@ import org.jobrunr.jobs.annotations.Recurring;
 
 /**
  * Lifecycle step 7, the hourly reconciler: a batch row written but never enqueued (a crash between
- * the two writes) sits in {@code SCHEDULED}, {@code NPIS_SELECTED} or {@code EGRESS_COMPLETED} with
+ * the two writes) sits in {@code SCHEDULED} or {@code EGRESS_COMPLETED} with
  * no job. This job finds rows untouched for longer than {@code reconcilerStaleMinutes} and
- * re-enqueues the job for their state: {@code SCHEDULED} the select job, {@code NPIS_SELECTED} the
- * egress request, {@code EGRESS_COMPLETED} the finish job, each under the batch's current attempt.
+ * re-enqueues the job for their state: {@code SCHEDULED} the egress request, {@code EGRESS_COMPLETED}
+ * the finish job, each under the batch's current attempt.
  * Job ids are deterministic, so a job that already exists is not enqueued twice, and every job
  * checks the row state first, so re-enqueueing one that is already running does nothing.
  * {@code EGRESS_REQUESTED} is owned by the deadline check and never touched here. Each re-enqueue
@@ -97,8 +97,6 @@ public class ReconcilerJob {
     private Reenqueued reenqueue(ExportBatch batch) {
         return switch (batch.state()) {
             case SCHEDULED -> new Reenqueued(
-                    batch.id(), batch.state(), SelectJob.NAME, enqueuer.select(batch.id(), batch.attempt()));
-            case NPIS_SELECTED -> new Reenqueued(
                     batch.id(),
                     batch.state(),
                     RequestEgressJob.NAME,

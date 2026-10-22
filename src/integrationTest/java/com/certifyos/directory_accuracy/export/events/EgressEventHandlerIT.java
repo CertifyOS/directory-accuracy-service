@@ -11,11 +11,11 @@ import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.export.jobs.FinishJob;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
+import com.certifyos.directory_accuracy.export.jobs.RequestEgressJob;
 import com.certifyos.directory_accuracy.persistence.Collections;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.mongodb.client.model.Filters;
@@ -49,9 +49,6 @@ class EgressEventHandlerIT {
     ExportBatchRepository batches;
 
     @Inject
-    ExportNpiRepository npis;
-
-    @Inject
     AuditRepository audit;
 
     @Inject
@@ -78,7 +75,6 @@ class EgressEventHandlerIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 tenant,
                 BatchState.EGRESS_REQUESTED,
                 3,
@@ -94,6 +90,21 @@ class EgressEventHandlerIT {
                 + "/f.csv\",\"totalRecords\":3,\"totalRows\":5,"
                 + (phase.equals("FAILED") ? "\"failureMessage\":\"pipeline blew up\"," : "")
                 + "\"completedAt\":\"2026-10-01T07:12:00Z\"}";
+    }
+
+    /** A FAILED event; {@code reason} and {@code blockReason} are the top-level and the selection block's, each optional. */
+    private static String failedEvent(String tenant, String correlationId, String reason, String blockReason) {
+        return "{\"schemaVersion\":\"" + EgressEventHandler.SCHEMA_VERSION + "\",\"type\":\"practitioner\","
+                + "\"tenantId\":\"" + tenant + "\",\"correlationId\":\"" + correlationId + "\",\"phase\":\"FAILED\","
+                + "\"failureMessage\":\"selection failed\","
+                + (reason == null ? "" : "\"failureReason\":\"" + reason + "\",")
+                + "\"selection\":{\"requested\":0,\"distinct\":0,\"matched\":0,\"unmatched\":0,\"parts\":0"
+                + (blockReason == null ? "" : ",\"failureReason\":\"" + blockReason + "\"") + "},"
+                + "\"completedAt\":\"2026-10-01T07:12:00Z\"}";
+    }
+
+    private List<AuditEventType> types(ExportBatch batch) {
+        return audit.findForBatch(batch.id(), 20).stream().map(AuditEvent::type).toList();
     }
 
     private static String envelope(String messageId, String eventJson) {
@@ -223,7 +234,6 @@ class EgressEventHandlerIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 "evt-late",
                 BatchState.EGRESS_COMPLETED,
                 1,
@@ -269,5 +279,96 @@ class EgressEventHandlerIT {
                 BatchState.EGRESS_REQUESTED,
                 batches.find(batch.id()).orElseThrow().state());
         Assertions.assertEquals(0, received("m-mid"));
+    }
+
+    @Test
+    void completedWithTheSelectionBlockRecordsEgressCounts() {
+        ExportBatch batch = requested("evt-counts");
+        String body = event(
+                        "evt-counts", batch.egress().correlationId(), "COMPLETED", EgressEventHandler.SCHEMA_VERSION)
+                .replace(
+                        "\"completedAt\"",
+                        "\"selection\":{\"requested\":4,\"distinct\":3,\"matched\":3,\"unmatched\":1,\"parts\":1,"
+                                + "\"listUsedUri\":\"gs://egress-list-used/evt-counts.csv\",\"reusedFrom\":null},"
+                                + "\"completedAt\"");
+
+        push("m-counts", body);
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EGRESS_COMPLETED, after.state());
+        Assertions.assertEquals(3L, after.selection().distinct());
+        Assertions.assertEquals(4L, after.selection().requested());
+        Assertions.assertEquals(1L, after.selection().unmatched());
+        Assertions.assertEquals(
+                "gs://egress-list-used/evt-counts.csv", after.selection().listUsedUri());
+        AuditEvent receivedEvent = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_EVENT_RECEIVED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals(3L, ((Number) receivedEvent.detail().get("selectionDistinct")).longValue());
+    }
+
+    @Test
+    void aFilterThatMatchedNobodyEndsTheBatchEmpty() {
+        ExportBatch batch = requested("evt-empty");
+        UUID deadline = EgressFixtures.deadlineId(batch);
+
+        push("m-empty", failedEvent("evt-empty", batch.egress().correlationId(), null, "NO_MATCHING_PRACTITIONERS"));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EMPTY, after.state());
+        Assertions.assertNull(after.failedStep());
+        Assertions.assertEquals(0L, after.selection().distinct());
+        Assertions.assertEquals(
+                List.of(AuditEventType.EXPORT_EVENT_RECEIVED, AuditEventType.EXPORT_BATCH_EMPTY),
+                types(batch).stream()
+                        .filter(type -> type == AuditEventType.EXPORT_EVENT_RECEIVED
+                                || type == AuditEventType.EXPORT_BATCH_EMPTY)
+                        .toList());
+        AuditEvent empty = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_BATCH_EMPTY)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals(EgressFixtures.FILTER_ID, empty.detail().get("filterId"));
+        Assertions.assertEquals("NO_MATCHING_PRACTITIONERS", empty.detail().get("failureReason"));
+        Assertions.assertEquals("EVENT", empty.detail().get("completionSource"));
+        Assertions.assertThrows(
+                org.jobrunr.storage.JobNotFoundException.class,
+                () -> storage.getJobById(JobIds.of(FinishJob.NAME, batch.id(), 1)),
+                "no finish job");
+        Assertions.assertEquals(StateName.DELETED, storage.getJobById(deadline).getState(), "deadline check deleted");
+    }
+
+    @Test
+    void anUnusableReuseSourceAsksEgressAgainUnderTheNextAttempt() {
+        ExportBatch batch = requested("evt-reuse");
+        UUID deadline = EgressFixtures.deadlineId(batch);
+
+        push(
+                "m-reuse",
+                failedEvent(
+                        "evt-reuse",
+                        batch.egress().correlationId(),
+                        "REUSE_SOURCE_UNUSABLE (source list is empty)",
+                        null));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.SCHEDULED, after.state());
+        Assertions.assertEquals(2, after.attempt());
+        Assertions.assertNull(after.failedStep(), "not a failure");
+        Assertions.assertEquals(
+                batch.egress().correlationId(), after.egress().correlationId(), "the next attempt names this one");
+        Assertions.assertEquals(
+                StateName.ENQUEUED,
+                storage.getJobById(JobIds.of(RequestEgressJob.NAME, batch.id(), 2))
+                        .getState());
+        Assertions.assertEquals(StateName.DELETED, storage.getJobById(deadline).getState(), "deadline check deleted");
+        AuditEvent refused = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_REUSE_REFUSED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals(2, refused.detail().get("newAttempt"));
+        Assertions.assertEquals(batch.egress().correlationId(), refused.detail().get("egressCorrelationId"));
+        Assertions.assertTrue(types(batch).contains(AuditEventType.EXPORT_EVENT_RECEIVED));
     }
 }

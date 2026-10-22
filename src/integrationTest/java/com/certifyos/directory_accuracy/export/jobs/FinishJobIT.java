@@ -5,12 +5,14 @@ import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
+import com.certifyos.directory_accuracy.auth.GoogleIdTokenService;
 import com.certifyos.directory_accuracy.clients.VendorBucket;
+import com.certifyos.directory_accuracy.clients.WireMockUpstreams;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.persistence.Transactions;
+import com.github.tomakehurst.wiremock.client.WireMock;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -23,12 +25,17 @@ import java.util.UUID;
 import org.jobrunr.jobs.states.StateName;
 import org.jobrunr.storage.StorageProvider;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-/** The finish job against a mocked vendor bucket: present and matching, mismatching, missing. */
+/**
+ * The finish job against a mocked vendor bucket and WireMock egress: present and matching,
+ * mismatching, missing, and selection counts read from the status when the batch has none.
+ */
 @QuarkusTest
 @QuarkusTestResource(MongoResource.class)
+@QuarkusTestResource(WireMockUpstreams.class)
 @TestProfile(ApiTestProfile.class)
 class FinishJobIT {
 
@@ -37,9 +44,6 @@ class FinishJobIT {
 
     @Inject
     ExportBatchRepository batches;
-
-    @Inject
-    ExportNpiRepository npis;
 
     @Inject
     AuditRepository audit;
@@ -56,14 +60,22 @@ class FinishJobIT {
     @InjectMock
     VendorBucket bucket;
 
-    private ExportBatch completed(String tenant, int npiCount) {
+    @InjectMock
+    GoogleIdTokenService google;
+
+    @BeforeEach
+    void before() {
+        Mockito.when(google.idToken("test-egress-iap-client-id")).thenReturn("egress-token");
+        WireMockUpstreams.resetRequests();
+    }
+
+    private ExportBatch completed(String tenant, int selected) {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 tenant,
                 BatchState.EGRESS_COMPLETED,
-                npiCount,
+                selected,
                 Instant.now().minusSeconds(3600));
         enqueuer.deadlineCheck(batch.id(), 1, 1, Instant.now().plusSeconds(3600));
         return batch;
@@ -104,7 +116,7 @@ class FinishJobIT {
         Assertions.assertEquals(BatchState.DELIVERED, after.state());
         Assertions.assertNotNull(after.deliveredAt());
         Assertions.assertTrue(after.reconciliation().match());
-        Assertions.assertEquals(3, after.reconciliation().registered());
+        Assertions.assertEquals(3, after.reconciliation().selected());
         Assertions.assertEquals(3, after.reconciliation().inFile());
         Assertions.assertEquals(batch.file().name(), after.file().name());
         Assertions.assertEquals(batch.file().path(), after.file().path());
@@ -116,10 +128,14 @@ class FinishJobIT {
         Assertions.assertEquals(batch.egress().correlationId(), after.egress().fileProducedBy());
         var trail = audit.findForBatch(batch.id(), 20);
         AuditEvent reconciled = trail.stream()
-                .filter(found -> found.type() == AuditEventType.NPIS_RECONCILED)
+                .filter(found -> found.type() == AuditEventType.EXPORT_RECONCILED)
                 .findFirst()
                 .orElseThrow();
         Assertions.assertTrue((Boolean) reconciled.detail().get("match"));
+        Assertions.assertEquals(3L, ((Number) reconciled.detail().get("selected")).longValue());
+        WireMockUpstreams.verify(
+                0,
+                WireMock.getRequestedFor(WireMock.urlPathMatching("/api/v1/egress/status/practitioner/fin-match/.*")));
         AuditEvent delivered = trail.stream()
                 .filter(found -> found.type() == AuditEventType.EXPORT_BATCH_DELIVERED)
                 .findFirst()
@@ -149,11 +165,11 @@ class FinishJobIT {
         ExportBatch after = batches.find(batch.id()).orElseThrow();
         Assertions.assertEquals(BatchState.DELIVERED, after.state());
         Assertions.assertFalse(after.reconciliation().match());
-        Assertions.assertEquals(4, after.reconciliation().registered());
+        Assertions.assertEquals(4, after.reconciliation().selected());
         Assertions.assertEquals(3, after.reconciliation().inFile());
         Assertions.assertNull(after.file().rowCount(), "no totalRows metadata, no row count");
         AuditEvent reconciled = audit.findForBatch(batch.id(), 20).stream()
-                .filter(found -> found.type() == AuditEventType.NPIS_RECONCILED)
+                .filter(found -> found.type() == AuditEventType.EXPORT_RECONCILED)
                 .findFirst()
                 .orElseThrow();
         Assertions.assertFalse((Boolean) reconciled.detail().get("match"));
@@ -194,5 +210,71 @@ class FinishJobIT {
         Assertions.assertEquals(
                 batch.id() + "-r0",
                 batches.find(batch.id()).orElseThrow().egress().fileProducedBy());
+    }
+
+    @Test
+    void countsMissingOnTheBatchAreReadOnceFromTheStatusAndRecorded() {
+        ExportBatch batch = completed("fin-status", -1);
+        Assertions.assertFalse(batch.selection().hasCounts());
+        objectAt(
+                batch,
+                512,
+                Map.of(
+                        "complete",
+                        "true",
+                        "totalRecords",
+                        "2",
+                        "correlationId",
+                        batch.egress().correlationId()));
+        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlEqualTo("/api/v1/egress/status/practitioner/"
+                        + batch.tenantId() + "/" + batch.egress().correlationId()))
+                .willReturn(WireMock.okJson("{\"state\":\"COMPLETED\",\"phase\":\"EXPORT_DONE\",\"gcs_complete\":true,"
+                        + "\"selection\":{\"state\":\"RESOLVED\",\"requested\":3,\"distinct\":2,\"matched\":2,"
+                        + "\"unmatched\":1,\"parts\":1,\"listUsedUri\":\"gs://egress-list-used/fin-status.csv\","
+                        + "\"reusedFrom\":null,\"attempts\":1,\"failureReason\":null}}")));
+
+        job.run(new FinishJobRequest(batch.id(), 1));
+
+        WireMockUpstreams.verify(
+                1,
+                WireMock.getRequestedFor(WireMock.urlPathMatching("/api/v1/egress/status/practitioner/fin-status/.*")));
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.DELIVERED, after.state());
+        Assertions.assertTrue(after.reconciliation().match());
+        Assertions.assertEquals(2, after.reconciliation().selected());
+        Assertions.assertEquals(2L, after.selection().distinct());
+        Assertions.assertEquals(1L, after.selection().unmatched());
+        Assertions.assertEquals(
+                "gs://egress-list-used/fin-status.csv", after.selection().listUsedUri());
+        Assertions.assertEquals(EgressFixtures.FILTER_ID, after.selection().filterId(), "the filter id is kept");
+    }
+
+    @Test
+    void aStatusWithoutSelectionCountsFailsTheBatch() {
+        ExportBatch batch = completed("fin-nocounts", -1);
+        objectAt(
+                batch,
+                512,
+                Map.of(
+                        "complete",
+                        "true",
+                        "totalRecords",
+                        "2",
+                        "correlationId",
+                        batch.egress().correlationId()));
+        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlEqualTo("/api/v1/egress/status/practitioner/"
+                        + batch.tenantId() + "/" + batch.egress().correlationId()))
+                .willReturn(
+                        WireMock.okJson("{\"state\":\"COMPLETED\",\"phase\":\"EXPORT_DONE\",\"gcs_complete\":true}")));
+
+        job.run(new FinishJobRequest(batch.id(), 1));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.FAILED, after.state());
+        AuditEvent failed = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_BATCH_FAILED)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals("SELECTION_COUNTS_MISSING", failed.detail().get("cause"));
     }
 }

@@ -1,7 +1,7 @@
 package com.certifyos.directory_accuracy.clients;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -61,11 +61,12 @@ class EgressContractsTest {
                 ";",
                 "csv",
                 "[\"locations\"]",
-                List.of("1234567893"),
+                EgressExportRequest.Selection.savedFilter("flt-direct"),
                 EgressClient.INITIATOR,
                 new EgressExportRequest.Destination("vendor-sftp", "from/org-a/file.csv"));
         String json = mapper.writeValueAsString(request);
-        Assertions.assertTrue(json.contains("\"npiFilter\":[\"1234567893\"]"));
+        Assertions.assertFalse(json.contains("npiFilter"), "egress refuses a selection beside an NPI list");
+        Assertions.assertTrue(json.contains("\"selection\":{\"source\":\"SAVED_FILTER\""));
         Assertions.assertTrue(
                 json.contains("\"destination\":{\"bucket\":\"vendor-sftp\",\"objectName\":\"from/org-a/file.csv\"}"));
         Assertions.assertTrue(
@@ -73,5 +74,47 @@ class EgressContractsTest {
         String sparse = mapper.writeValueAsString(new EgressExportRequest(
                 EgressExportRequest.PRACTITIONER, "org-a", "c", null, null, null, null, null, null, null, null));
         Assertions.assertFalse(sparse.contains("templateId"), "nulls are omitted");
+    }
+
+    @Test
+    void firstAttemptSelectionNamesTheFilter() throws Exception {
+        String json = mapper.writeValueAsString(EgressExportRequest.Selection.savedFilter("flt_candor-1"));
+        Assertions.assertEquals(
+                Map.of("source", "SAVED_FILTER", "filterId", "flt_candor-1", "listUsed", true),
+                mapper.readValue(json, Map.class));
+    }
+
+    @Test
+    void retrySelectionNamesTheEarlierAttemptOnly() throws Exception {
+        String json = mapper.writeValueAsString(EgressExportRequest.Selection.reuse("org-a-candor-2026-10-001-r1"));
+        Assertions.assertEquals(
+                Map.of("listUsed", true, "reuseSelectionFrom", "org-a-candor-2026-10-001-r1"),
+                mapper.readValue(json, Map.class),
+                "no source and no filterId: egress refuses either beside a reuse");
+    }
+
+    @Test
+    void statusSelectionBlockIsCamelCaseInsideTheSnakeCaseResponse() throws Exception {
+        EgressStatusResponse status = mapper.readValue(
+                """
+                {"type":"practitioner","tenant_id":"org-a","correlation_id":"c-1","state":"FAILED",
+                 "selection":{"source":"SAVED_FILTER","ref":"flt-1","state":"FAILED","cursor":null,
+                  "expectedCount":null,"requested":0,"distinct":0,"duplicates":0,"matched":0,"unmatched":0,
+                  "parts":0,"window":{"start":"2026-10-01T06:00:00Z","end":null},
+                  "listUsedUri":"gs://egress/list-used/c-1.csv","reusedFrom":null,"attempts":1,
+                  "failureReason":"NO_MATCHING_PRACTITIONERS"}}
+                """,
+                EgressStatusResponse.class);
+        Assertions.assertEquals(0L, status.selection().distinct());
+        Assertions.assertEquals(
+                "gs://egress/list-used/c-1.csv", status.selection().listUsedUri());
+        Assertions.assertEquals("NO_MATCHING_PRACTITIONERS", status.selection().failureReason());
+    }
+
+    @Test
+    void statusWithoutSelectionReadsNull() throws Exception {
+        EgressStatusResponse status =
+                mapper.readValue("{\"correlation_id\":\"c-1\",\"state\":\"COMPLETED\"}", EgressStatusResponse.class);
+        Assertions.assertNull(status.selection());
     }
 }

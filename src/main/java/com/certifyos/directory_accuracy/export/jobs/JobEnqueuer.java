@@ -22,17 +22,20 @@ public class JobEnqueuer {
         this.scheduler = scheduler;
     }
 
-    /** Enqueues the select job for a batch attempt and returns its id. */
-    public UUID select(String exportBatchId, int attempt) {
-        UUID id = JobIds.of(SelectJob.NAME, exportBatchId, attempt);
-        scheduler.enqueue(id, new SelectJobRequest(exportBatchId, attempt));
-        return id;
-    }
-
     /** Enqueues the egress request job for a batch attempt and returns its id. */
     public UUID requestEgress(String exportBatchId, int attempt) {
         UUID id = JobIds.of(RequestEgressJob.NAME, exportBatchId, attempt);
-        scheduler.enqueue(id, new RequestEgressJobRequest(exportBatchId, attempt));
+        scheduler.enqueue(id, new RequestEgressJobRequest(exportBatchId, attempt, 0));
+        return id;
+    }
+
+    /**
+     * Schedules the egress request job again after egress refused it for the tenant's selection
+     * quota; each wait is a new job, so JobRunr's retries stay untouched.
+     */
+    public UUID requestEgressAfterQuota(String exportBatchId, int attempt, int wait, Instant at) {
+        UUID id = JobIds.quotaWait(exportBatchId, attempt, wait);
+        scheduler.schedule(id, at, new RequestEgressJobRequest(exportBatchId, attempt, wait));
         return id;
     }
 

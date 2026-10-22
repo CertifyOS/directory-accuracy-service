@@ -5,15 +5,11 @@ import com.certifyos.directory_accuracy.auth.RequiresPermission;
 import com.certifyos.directory_accuracy.auth.UserContext;
 import com.certifyos.directory_accuracy.export.api.AuditViews.EventView;
 import com.certifyos.directory_accuracy.export.api.BatchViews.BatchView;
-import com.certifyos.directory_accuracy.export.api.BatchViews.NpiPage;
-import com.certifyos.directory_accuracy.export.api.BatchViews.NpiView;
 import com.certifyos.directory_accuracy.export.api.BatchViews.ReasonRequest;
 import com.certifyos.directory_accuracy.export.api.BatchViews.RetryResponse;
 import com.certifyos.directory_accuracy.export.api.BatchViews.SupersedeResponse;
 import com.certifyos.directory_accuracy.export.batch.BatchOperations;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
-import com.certifyos.directory_accuracy.export.batch.ExportNpi;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.http.Problem;
 import com.certifyos.directory_accuracy.http.ProblemException;
 import jakarta.ws.rs.Consumes;
@@ -25,7 +21,6 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import java.util.List;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -68,17 +63,12 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
         content = @Content(mediaType = Problem.MEDIA_TYPE, schema = @Schema(implementation = Problem.class)))
 public class VendorExportsResource {
 
-    static final int NPI_PAGE_DEFAULT = 100;
-    static final int NPI_PAGE_MAX = 1000;
-
     private final UserContext ctx;
     private final BatchOperations operations;
-    private final ExportNpiRepository npis;
 
-    public VendorExportsResource(UserContext ctx, BatchOperations operations, ExportNpiRepository npis) {
+    public VendorExportsResource(UserContext ctx, BatchOperations operations) {
         this.ctx = ctx;
         this.operations = operations;
-        this.npis = npis;
     }
 
     /**
@@ -119,37 +109,6 @@ public class VendorExportsResource {
     }
 
     /**
-     * The NPIs registered for a batch, ordered by NPI, keyset paged.
-     *
-     * @param exportBatchId the batch
-     * @param after the last NPI of the previous page, or absent for the first page
-     * @param limit page size, default 100, at most 1000
-     * @return the page and the cursor for the next
-     */
-    @GET
-    @Path("/{exportBatchId}/npis")
-    @RequiresPermission(Permission.READ)
-    @Operation(
-            summary = "List a batch's registered NPIs",
-            description = "Ordered by NPI; pass nextAfter back as after for the next page. On a count mismatch, "
-                    + "this is the list an operator diffs against the file.")
-    public NpiPage npis(
-            @PathParam("exportBatchId") String exportBatchId,
-            @QueryParam("after") String after,
-            @QueryParam("limit") Integer limit) {
-        ExportBatch batch = operations.require(ctx.tenantId(), exportBatchId);
-        int size = limit == null ? NPI_PAGE_DEFAULT : limit;
-        if (size < 1 || size > NPI_PAGE_MAX) {
-            throw ProblemException.badRequest("INVALID_REQUEST", "limit must be 1.." + NPI_PAGE_MAX);
-        }
-        List<ExportNpi> rows = npis.listForBatch(batch.id(), after, size + 1);
-        boolean more = rows.size() > size;
-        List<ExportNpi> page = more ? rows.subList(0, size) : rows;
-        String nextAfter = more ? page.get(page.size() - 1).npi() : null;
-        return new NpiPage(page.stream().map(NpiView::of).toList(), nextAfter);
-    }
-
-    /**
      * A batch's audit trail.
      *
      * @param exportBatchId the batch
@@ -179,8 +138,8 @@ public class VendorExportsResource {
     @RequiresPermission(Permission.MANAGE)
     @Operation(
             summary = "Retry a failed export batch",
-            description = "From FAILED only. attempt + 1; failedStep SELECT goes back to SCHEDULED with a select job, "
-                    + "EGRESS to NPIS_SELECTED with an egress request job (which cancels the prior attempt first).")
+            description = "From FAILED only. attempt + 1, back to SCHEDULED with an egress request job, which cancels "
+                    + "the prior attempt first and asks egress to reuse its frozen practitioner list.")
     @APIResponse(
             responseCode = "202",
             description = "Retry accepted",
@@ -201,14 +160,15 @@ public class VendorExportsResource {
      *
      * @param exportBatchId the batch
      * @param request the reason
-     * @return 201 with the new batch id and its select job
+     * @return 201 with the new batch id and its egress request job
      */
     @POST
     @Path("/{exportBatchId}/supersede")
     @RequiresPermission(Permission.MANAGE)
     @Operation(
             summary = "Supersede a delivered export batch",
-            description = "From DELIVERED only. Creates seq + 1 in SCHEDULED with the schedule's current selection, "
+            description = "From DELIVERED only. Creates seq + 1 in SCHEDULED with the schedule's current saved filter, "
+                    + "which egress evaluates afresh; "
                     + "marks this batch SUPERSEDED and points the schedule's lastBatchId at the new one. The old "
                     + "file stays in the vendor folder.")
     @APIResponse(

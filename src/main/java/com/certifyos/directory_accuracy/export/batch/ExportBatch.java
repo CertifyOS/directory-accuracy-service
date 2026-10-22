@@ -1,11 +1,9 @@
 package com.certifyos.directory_accuracy.export.batch;
 
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
 import com.certifyos.directory_accuracy.persistence.Documents;
 import com.certifyos.directory_accuracy.persistence.Ids;
 import java.time.Instant;
 import java.time.YearMonth;
-import java.util.List;
 import org.bson.Document;
 
 /**
@@ -20,11 +18,11 @@ import org.bson.Document;
  * @param seq 1 for the first batch of the period; supersede adds one
  * @param state the lifecycle state
  * @param attempt 1 on creation; operator retry adds one
- * @param selection the criteria copied at creation and the selection progress
+ * @param selection the saved filter id copied at creation and egress's selection counts
  * @param egress the egress request details, null before the request
  * @param file the delivered file, null before delivery
  * @param reconciliation the count check, null before delivery
- * @param failedStep {@code SELECT} or {@code EGRESS} while failed
+ * @param failedStep {@code EGRESS} while failed
  * @param lastError the last failure cause while failed
  * @param supersededBy the newer batch id once superseded
  * @param acknowledgedAt set later by the ingestion module
@@ -58,34 +56,68 @@ public record ExportBatch(
 
     /** Where a failed batch stopped; decides which job an operator retry re-enqueues. */
     public enum FailedStep {
-        SELECT,
         EGRESS
     }
 
     /**
-     * The criteria copied from the schedule at creation and the select job's progress.
+     * The schedule's saved filter id copied at creation and what egress reported about the
+     * selection it made from it. The counts are null until egress completes.
      *
-     * @param criteria the copied criteria
-     * @param page the last api-layer page fetched while selection runs, null when done
-     * @param practitionersSelected the count once selection completed
-     * @param completedAt when selection completed
+     * @param filterId the saved filter id, copied from the schedule
+     * @param requested ids the filter returned
+     * @param distinct distinct practitioners egress exported; the reconciliation's expected count
+     * @param unmatched ids egress could not find
+     * @param parts slices egress built the file from
+     * @param reusedFrom the earlier attempt whose frozen list this attempt reused, or null
+     * @param listUsedUri egress's list-used file, kept 7 days, for diffing a count mismatch
+     * @param reEvaluated true when a retry could not reuse the earlier list and egress evaluated the
+     *     filter again; absent otherwise
+     * @param completedAt when the counts were recorded
      */
     public record Selection(
-            SelectionCriteria criteria, Integer page, Integer practitionersSelected, Instant completedAt) {
+            String filterId,
+            Long requested,
+            Long distinct,
+            Long unmatched,
+            Long parts,
+            String reusedFrom,
+            String listUsedUri,
+            Boolean reEvaluated,
+            Instant completedAt) {
+
+        /** A batch's selection before egress has run: the filter id only. */
+        static Selection of(String filterId) {
+            return new Selection(filterId, null, null, null, null, null, null, null, null);
+        }
+
+        /** Whether egress's counts have been recorded. */
+        public boolean hasCounts() {
+            return distinct != null;
+        }
+
         Document toDocument() {
-            Document doc = new Document("criteria", criteria.toDocuments());
-            Documents.put(doc, "page", page);
-            Documents.put(doc, "practitionersSelected", practitionersSelected);
+            Document doc = new Document("filterId", filterId);
+            Documents.put(doc, "requested", requested);
+            Documents.put(doc, "distinct", distinct);
+            Documents.put(doc, "unmatched", unmatched);
+            Documents.put(doc, "parts", parts);
+            Documents.put(doc, "reusedFrom", reusedFrom);
+            Documents.put(doc, "listUsedUri", listUsedUri);
+            Documents.put(doc, "reEvaluated", reEvaluated);
             Documents.put(doc, "completedAt", completedAt);
             return doc;
         }
 
         static Selection fromDocument(Document doc) {
-            List<Document> criteria = doc.getList("criteria", Document.class);
             return new Selection(
-                    SelectionCriteria.fromDocuments(criteria),
-                    Documents.intValue(doc, "page"),
-                    Documents.intValue(doc, "practitionersSelected"),
+                    doc.getString("filterId"),
+                    Documents.longValue(doc, "requested"),
+                    Documents.longValue(doc, "distinct"),
+                    Documents.longValue(doc, "unmatched"),
+                    Documents.longValue(doc, "parts"),
+                    doc.getString("reusedFrom"),
+                    doc.getString("listUsedUri"),
+                    doc.getBoolean("reEvaluated"),
                     Documents.instant(doc, "completedAt"));
         }
     }
@@ -97,12 +129,12 @@ public record ExportBatch(
      * @param vendor the vendor code
      * @param period the month
      * @param seq the sequence
-     * @param criteria the schedule's criteria, copied
+     * @param filterId the schedule's saved filter id, copied
      * @param now the creation time
      * @return the batch to insert
      */
     public static ExportBatch scheduled(
-            String tenantId, String vendor, YearMonth period, int seq, SelectionCriteria criteria, Instant now) {
+            String tenantId, String vendor, YearMonth period, int seq, String filterId, Instant now) {
         return new ExportBatch(
                 Ids.batchId(tenantId, vendor, period, seq),
                 tenantId,
@@ -111,7 +143,7 @@ public record ExportBatch(
                 seq,
                 BatchState.SCHEDULED,
                 1,
-                new Selection(criteria, null, null, null),
+                Selection.of(filterId),
                 null,
                 null,
                 null,

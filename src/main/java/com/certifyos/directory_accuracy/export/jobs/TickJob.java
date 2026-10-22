@@ -23,8 +23,8 @@ import org.jobrunr.jobs.annotations.Recurring;
 
 /**
  * Lifecycle step 1: the daily tick. One indexed query for due schedules, then one transaction per
- * due row (batch insert, {@code nextDueAt} advance, {@code EXPORT_BATCH_SCHEDULED}) and one select
- * job each, through {@link BatchLifecycle}. Calls no other service. The period is the month of the
+ * due row (batch insert, {@code nextDueAt} advance, {@code EXPORT_BATCH_SCHEDULED}) and one egress
+ * request job each, through {@link BatchLifecycle}. Calls no other service. The period is the month of the
  * due {@code nextDueAt} in the schedule's timezone, so a late tick still names the right month; the
  * sequence is always 1, because the tick never creates a second batch for a period (supersede
  * does). A period that already has its batch is counted as {@code skippedAlreadyExists}, and a
@@ -151,7 +151,7 @@ public class TickJob {
          * @param tenantId the tenant
          * @param vendor the vendor
          * @param exportBatchId the batch
-         * @param jobId the select job
+         * @param jobId the egress request job
          * @param nextDueAt the schedule's new due instant
          */
         public record Created(String tenantId, String vendor, String exportBatchId, String jobId, Instant nextDueAt) {}

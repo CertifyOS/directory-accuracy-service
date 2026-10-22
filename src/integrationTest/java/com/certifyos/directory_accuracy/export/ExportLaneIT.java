@@ -60,8 +60,8 @@ import org.mockito.Mockito;
 
 /**
  * The whole export lane on the worker role, with JobRunr executing the jobs: an operator creates a
- * schedule and runs it now, the select job pages api-layer, the egress request job pins the
- * template and asks egress, the completion arrives (by push event, by the deadline check, or
+ * schedule with a saved filter id and runs it now, the egress request job pins the template and
+ * asks egress to select the filter's practitioners and build the file, the completion arrives (by push event, by the deadline check, or
  * after a failure and a retry), the finish job verifies the file and the batch is DELIVERED. The
  * three external systems are WireMock (DAL, api-layer, egress) and a mocked bucket. One tenant,
  * one vendor per scenario, so the batch ids never collide.
@@ -76,6 +76,7 @@ class ExportLaneIT {
 
     static final String EMAIL = UserContextFilter.EMAIL_CLAIM;
     static final String TENANT = "org-lane";
+    static final String FILTER_ID = "flt-lane-direct";
     static final String SCHEDULES = "/v1/vendor-exports/schedules/" + TENANT + "/";
     static final String BATCHES = "/v1/vendor-exports/";
     static final String EVENTS = "/internal/vendor-exports/egress-events";
@@ -83,16 +84,18 @@ class ExportLaneIT {
     static final String EXPORT = "/api/v1/egress/export";
     static final Duration HOP = Duration.ofSeconds(60);
     static final String SCHEDULE_BODY = "{\"cadence\":{\"type\":\"monthly\",\"dayOfMonth\":1},\"timezone\":\"UTC\","
-            + "\"selection\":{\"data.delegationStatus\":{\"in\":[\"Direct\"]}}}";
+            + "\"filterId\":\"" + ExportLaneIT.FILTER_ID + "\"}";
     static final String TEMPLATE = "{\"id\":\"tpl-lane\",\"tenantId\":\"" + TENANT + "\",\"templateName\":\""
             + TemplateProvisioner.TEMPLATE_NAME
             + "\",\"entityType\":\"practitioner\",\"status\":\"active\",\"version\":2,"
             + "\"mappingsCsvUrl\":\"gs://egress-templates/" + TENANT
             + "/tpl-lane/v2/mappings.csv\",\"separator\":\";\","
             + "\"outputFormat\":\"csv\",\"rowExpansionKeys\":[\"locations\"]}";
-    static final String PRACTITIONERS =
-            "{\"data\":[{\"id\":\"p-1\",\"npi\":\"1234567893\"},{\"id\":\"p-2\",\"npi\":\"2345678918\"},"
-                    + "{\"id\":\"p-3\",\"npi\":\"3456789012\"}],\"totalCount\":3}";
+    /** Egress's selection block for the three practitioners the saved filter matches. */
+    static final String SELECTION_BLOCK = "\"selection\":{\"source\":\"SAVED_FILTER\",\"state\":\"RESOLVED\","
+            + "\"requested\":3,\"distinct\":3,\"matched\":3,\"unmatched\":0,\"parts\":1,"
+            + "\"listUsedUri\":\"gs://egress-list-used/lane.csv\",\"reusedFrom\":null,\"attempts\":1,"
+            + "\"failureReason\":null}";
 
     /** Objects the mocked bucket answers, by object name. */
     static final Map<String, VendorBucket.ObjectInfo> OBJECTS = new ConcurrentHashMap<>();
@@ -142,9 +145,21 @@ class ExportLaneIT {
         WireMockUpstreams.stubFor(WireMock.get(WireMock.urlPathEqualTo(TEMPLATES + "/tpl-lane"))
                 .withHeader("tenant-id", WireMock.equalTo(TENANT))
                 .willReturn(WireMock.okJson(TEMPLATE)));
-        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlPathEqualTo("/practitioners"))
-                .withHeader("tenant-id", WireMock.equalTo(TENANT))
-                .willReturn(WireMock.okJson(PRACTITIONERS)));
+    }
+
+    /** The first batch id run-now creates for a vendor this month (schedules here are in UTC). */
+    private static String batchIdFor(String vendor) {
+        return TENANT + "-" + vendor + "-" + java.time.YearMonth.now(ZoneId.of("UTC")) + "-001";
+    }
+
+    /** Egress's status for a finished export, with the selection block the finish job reconciles against. */
+    private static void stubStatusCompleted(String correlationId) {
+        WireMockUpstreams.stubFor(
+                WireMock.get(WireMock.urlEqualTo("/api/v1/egress/status/practitioner/" + TENANT + "/" + correlationId))
+                        .willReturn(WireMock.okJson(
+                                "{\"state\":\"COMPLETE\",\"phase\":\"COMPLETED\",\"total_rows\":4,\"rows_with_data\":3,"
+                                        + "\"gcs_uri\":\"gs://test-vendor-bucket/from/x.csv\",\"gcs_complete\":true,"
+                                        + SELECTION_BLOCK + "}")));
     }
 
     private static RequestSpecification member() {
@@ -167,7 +182,7 @@ class ExportLaneIT {
                         + "\",\"correlationId\":\"" + correlationId + "\",\"phase\":\"" + phase + "\","
                         + "\"outputUri\":\"gs://test-vendor-bucket/from/" + TENANT
                         + "/x.csv\",\"totalRecords\":3,\"totalRows\":4,"
-                        + (phase.equals("FAILED") ? "\"failureMessage\":\"dataflow died\"," : "")
+                        + (phase.equals("FAILED") ? "\"failureMessage\":\"dataflow died\"," : SELECTION_BLOCK + ",")
                         + "\"completedAt\":\"2026-10-01T07:12:00Z\"}";
         String data = Base64.getEncoder().encodeToString(event.getBytes(StandardCharsets.UTF_8));
         RestAssured.given()
@@ -229,9 +244,9 @@ class ExportLaneIT {
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "lane@certifyos.com")})
     void runNowToDeliveredThroughTheCompletionEvent() {
-        String batchId = runNow("candor");
-        String correlationId = batchId + "-r1";
+        String correlationId = batchIdFor("candor") + "-r1";
         stubExportAccepted(correlationId);
+        String batchId = runNow("candor");
 
         ExportBatch requested = awaitState(batchId, BatchState.EGRESS_REQUESTED);
 
@@ -248,13 +263,14 @@ class ExportLaneIT {
                                         + "\"templateId\":\"tpl-lane\",\"mappingsCsvUrl\":\"gs://egress-templates/"
                                         + TENANT + "/tpl-lane/v2/mappings.csv\","
                                         + "\"separator\":\";\",\"outputFormat\":\"csv\",\"rowExpansionKeys\":\"[\\\"locations\\\"]\","
-                                        + "\"npiFilter\":[\"1234567893\",\"2345678918\",\"3456789012\"],\"userId\":\"directory-accuracy-worker\","
+                                        + "\"selection\":{\"source\":\"SAVED_FILTER\",\"filterId\":\"" + FILTER_ID
+                                        + "\",\"listUsed\":true},\"userId\":\"directory-accuracy-worker\","
                                         + "\"destination\":{\"bucket\":\"test-vendor-bucket\",\"objectName\":\""
                                         + objectName + "\"}}",
                                 true,
                                 false)));
-        Assertions.assertEquals(3, requested.selection().practitionersSelected());
-        Assertions.assertNull(requested.selection().page());
+        Assertions.assertEquals(FILTER_ID, requested.selection().filterId());
+        Assertions.assertFalse(requested.selection().hasCounts(), "egress has not reported yet");
         Assertions.assertEquals(2, requested.egress().templateVersion());
         Assertions.assertEquals(
                 StateName.SCHEDULED,
@@ -288,7 +304,12 @@ class ExportLaneIT {
         Assertions.assertEquals(4096L, delivered.file().bytes());
         Assertions.assertEquals("certify-export-v1", delivered.file().schemaVersion());
         Assertions.assertTrue(delivered.reconciliation().match());
+        Assertions.assertEquals(3, delivered.reconciliation().selected());
         Assertions.assertEquals(3, delivered.reconciliation().inFile());
+        Assertions.assertEquals(3L, delivered.selection().distinct());
+        Assertions.assertEquals(
+                "gs://egress-list-used/lane.csv", delivered.selection().listUsedUri());
+        WireMockUpstreams.verify(0, WireMock.getRequestedFor(WireMock.urlPathMatching("/api/v1/egress/status/.*")));
         Assertions.assertNotNull(delivered.deliveredAt());
         Assertions.assertEquals(
                 StateName.DELETED,
@@ -300,12 +321,10 @@ class ExportLaneIT {
         Assertions.assertEquals(
                 List.of(
                         AuditEventType.EXPORT_BATCH_SCHEDULED,
-                        AuditEventType.NPIS_REGISTERED,
-                        AuditEventType.EXPORT_SELECTION_COMPLETED,
                         AuditEventType.EXPORT_EGRESS_REQUESTED,
                         AuditEventType.EXPORT_EVENT_RECEIVED,
                         AuditEventType.EXPORT_EGRESS_COMPLETED,
-                        AuditEventType.NPIS_RECONCILED,
+                        AuditEventType.EXPORT_RECONCILED,
                         AuditEventType.EXPORT_BATCH_DELIVERED),
                 trail(batchId));
 
@@ -314,18 +333,19 @@ class ExportLaneIT {
                 .statusCode(200)
                 .body("state", Matchers.equalTo("DELIVERED"))
                 .body("reconciliation.match", Matchers.equalTo(true))
+                .body("selection.filterId", Matchers.equalTo(FILTER_ID))
+                .body("selection.distinct", Matchers.equalTo(3))
                 .body("egress", Matchers.not(Matchers.hasKey("deadlineJobId")));
-        member().get(BATCHES + batchId + "/npis").then().statusCode(200).body("items.size()", Matchers.equalTo(3));
         member().get(BATCHES + batchId + "/events")
                 .then()
                 .statusCode(200)
-                .body("items.size()", Matchers.equalTo(8))
+                .body("items.size()", Matchers.equalTo(6))
                 .body("items[0].type", Matchers.equalTo("EXPORT_BATCH_SCHEDULED"))
                 .body("items[0].actor", Matchers.equalTo("lane@certifyos.com"))
                 .body("items[0].detail.trigger", Matchers.equalTo("MANUAL"))
-                .body("items[7].type", Matchers.equalTo("EXPORT_BATCH_DELIVERED"))
+                .body("items[5].type", Matchers.equalTo("EXPORT_BATCH_DELIVERED"))
                 .body(
-                        "items[7].detail.fileName",
+                        "items[5].detail.fileName",
                         Matchers.equalTo(delivered.file().name()));
         member().get(SCHEDULES + "candor/events")
                 .then()
@@ -339,15 +359,11 @@ class ExportLaneIT {
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "lane@certifyos.com")})
     void withTheEventWithheldTheDeadlineCheckDelivers() {
-        String batchId = runNow("lane-deadline");
-        String correlationId = batchId + "-r1";
+        String correlationId = batchIdFor("lane-deadline") + "-r1";
         stubExportAccepted(correlationId);
+        String batchId = runNow("lane-deadline");
         ExportBatch requested = awaitState(batchId, BatchState.EGRESS_REQUESTED);
-        WireMockUpstreams.stubFor(WireMock.get(
-                        WireMock.urlEqualTo("/api/v1/egress/status/practitioner/" + TENANT + "/" + correlationId))
-                .willReturn(WireMock.okJson(
-                        "{\"state\":\"COMPLETE\",\"phase\":\"COMPLETED\",\"total_rows\":4,\"rows_with_data\":3,"
-                                + "\"gcs_uri\":\"gs://test-vendor-bucket/from/x.csv\",\"gcs_complete\":true}")));
+        stubStatusCompleted(correlationId);
         fileAt(requested, correlationId);
 
         // The real check is scheduled six hours out; running its body now is the same code path.
@@ -360,12 +376,10 @@ class ExportLaneIT {
         Assertions.assertEquals(
                 List.of(
                         AuditEventType.EXPORT_BATCH_SCHEDULED,
-                        AuditEventType.NPIS_REGISTERED,
-                        AuditEventType.EXPORT_SELECTION_COMPLETED,
                         AuditEventType.EXPORT_EGRESS_REQUESTED,
                         AuditEventType.EXPORT_EVENT_MISSED,
                         AuditEventType.EXPORT_EGRESS_COMPLETED,
-                        AuditEventType.NPIS_RECONCILED,
+                        AuditEventType.EXPORT_RECONCILED,
                         AuditEventType.EXPORT_BATCH_DELIVERED),
                 trail(batchId));
     }
@@ -374,15 +388,15 @@ class ExportLaneIT {
     @Order(3)
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "lane@certifyos.com")})
-    void aFailedFirstAttemptIsRetriedUnderR2WithThePriorCancelled() {
-        String batchId = runNow("lane-retry");
-        String first = batchId + "-r1";
-        String second = batchId + "-r2";
+    void aFailedFirstAttemptIsRetriedUnderR2WithThePriorCancelledAndItsListReused() {
+        String first = batchIdFor("lane-retry") + "-r1";
+        String second = batchIdFor("lane-retry") + "-r2";
         stubExportAccepted(first);
         stubExportAccepted(second);
         WireMockUpstreams.stubFor(WireMock.post(
                         WireMock.urlEqualTo("/api/v1/egress/jobs/practitioner/" + TENANT + "/" + first + "/cancel"))
                 .willReturn(WireMock.jsonResponse("{\"status\":\"cancellation_requested\"}", 202)));
+        String batchId = runNow("lane-retry");
         awaitState(batchId, BatchState.EGRESS_REQUESTED);
 
         pushEvent("lane-m-fail", first, "FAILED");
@@ -410,7 +424,9 @@ class ExportLaneIT {
         WireMockUpstreams.verify(
                 1,
                 WireMock.postRequestedFor(WireMock.urlEqualTo(EXPORT))
-                        .withRequestBody(WireMock.matchingJsonPath("$.correlationId", WireMock.equalTo(second))));
+                        .withRequestBody(WireMock.matchingJsonPath("$.correlationId", WireMock.equalTo(second)))
+                        .withRequestBody(
+                                WireMock.matchingJsonPath("$.selection.reuseSelectionFrom", WireMock.equalTo(first))));
         WireMockUpstreams.verify(
                 1,
                 WireMock.getRequestedFor(WireMock.urlPathEqualTo(TEMPLATES + "/tpl-lane"))
@@ -424,8 +440,6 @@ class ExportLaneIT {
         Assertions.assertEquals(
                 List.of(
                         AuditEventType.EXPORT_BATCH_SCHEDULED,
-                        AuditEventType.NPIS_REGISTERED,
-                        AuditEventType.EXPORT_SELECTION_COMPLETED,
                         AuditEventType.EXPORT_EGRESS_REQUESTED,
                         AuditEventType.EXPORT_EVENT_RECEIVED,
                         AuditEventType.EXPORT_BATCH_FAILED,
@@ -434,7 +448,7 @@ class ExportLaneIT {
                         AuditEventType.EXPORT_EGRESS_REQUESTED,
                         AuditEventType.EXPORT_EVENT_RECEIVED,
                         AuditEventType.EXPORT_EGRESS_COMPLETED,
-                        AuditEventType.NPIS_RECONCILED,
+                        AuditEventType.EXPORT_RECONCILED,
                         AuditEventType.EXPORT_BATCH_DELIVERED),
                 trail(batchId));
     }
@@ -443,8 +457,8 @@ class ExportLaneIT {
     @Order(4)
     void theMetricsEndpointReflectsTheThreeScenarios() {
         // The design's names as Prometheus renders them, with the labels and the values the three
-        // scenarios produced: three batches, nine practitioners over three pages, two completions by
-        // event and one by the deadline path, one egress failure, no count mismatch. Tags render in
+        // scenarios produced: three batches, three practitioners selected for candor, two completions
+        // by event and one by the deadline path, one egress failure, no count mismatch. Tags render in
         // alphabetical order. The four names the lane did not touch here (event.rejected,
         // reconcile.mismatch, jobs.retries, jobs.final_failures) are covered by MetricsEndpointIT.
         String body =
@@ -458,7 +472,6 @@ class ExportLaneIT {
                 "vendor_export_batches_created_total{tenant=\"" + TENANT + "\",vendor=\"lane-deadline\"} 1.0",
                 "vendor_export_batches_created_total{tenant=\"" + TENANT + "\",vendor=\"lane-retry\"} 1.0",
                 "vendor_export_selection_practitioners{tenant=\"" + TENANT + "\",vendor=\"candor\"} 3.0",
-                "vendor_export_selection_pages_total{tenant=\"" + TENANT + "\"} 3.0",
                 "vendor_export_egress_wait_seconds{tenant=\"" + TENANT + "\"}",
                 "vendor_export_egress_failed_total{reason=\"EGRESS_FAILED\",tenant=\"" + TENANT + "\"} 1.0",
                 "vendor_export_completion_source_total{source=\"EVENT\"} 2.0",

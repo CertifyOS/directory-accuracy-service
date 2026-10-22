@@ -23,8 +23,9 @@ import org.jobrunr.jobs.lambdas.JobRequestHandler;
 
 /**
  * Lifecycle step 5: the fallback when the completion event never arrives. Check 1 runs at request +
- * {@code deadlineHours}: a finished file completes the batch ({@code completionSource = DEADLINE}),
- * a failed job fails it, anything else is recorded as stale and check 2 is scheduled at request +
+ * {@code deadlineHours}: a finished file completes the batch ({@code completionSource = DEADLINE})
+ * with the status's selection counts, a failed job is settled by its selection reason (empty,
+ * asked again, or failed), anything else is recorded as stale and check 2 is scheduled at request +
  * {@code abandonHours}. Check 2 fails a batch still running after a best-effort cancel. Only runs
  * while the batch is {@code EGRESS_REQUESTED}; egress errors propagate for JobRunr's retry.
  */
@@ -101,17 +102,18 @@ public class DeadlineCheckJob implements JobRequestHandler<DeadlineCheckJobReque
             completion.egressCompleted(
                     batch,
                     EgressDetails.CompletionSource.DEADLINE,
-                    new BatchCompletion.Outcome(status.gcsUri(), status.rowsWithData(), status.totalRows(), null),
+                    new BatchCompletion.Outcome(
+                            status.gcsUri(), status.rowsWithData(), status.totalRows(), null, status.selection()),
                     List.of(missed(batch, check, phase, hours, now)),
                     now);
             return;
         }
         if (PHASE_FAILED.equals(phase)) {
-            completion.failed(
+            completion.egressFailed(
                     batch,
-                    BatchState.EGRESS_REQUESTED,
-                    BatchCompletion.EGRESS_FAILED,
+                    status.selection() == null ? null : status.selection().failureReason(),
                     "egress reported " + phase + " at deadline check " + check,
+                    EgressDetails.CompletionSource.DEADLINE,
                     List.of(missed(batch, check, phase, hours, now)),
                     now,
                     false);

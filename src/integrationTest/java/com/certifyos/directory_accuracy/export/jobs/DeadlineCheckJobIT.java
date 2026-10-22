@@ -11,7 +11,6 @@ import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import io.quarkus.test.InjectMock;
@@ -45,9 +44,6 @@ class DeadlineCheckJobIT {
     ExportBatchRepository batches;
 
     @Inject
-    ExportNpiRepository npis;
-
-    @Inject
     AuditRepository audit;
 
     @Inject
@@ -72,7 +68,6 @@ class DeadlineCheckJobIT {
         return EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 tenant,
                 BatchState.EGRESS_REQUESTED,
                 2,
@@ -85,6 +80,19 @@ class DeadlineCheckJobIT {
                 .willReturn(WireMock.okJson("{\"state\":\"RUNNING\",\"phase\":\"" + phase
                         + "\",\"total_rows\":5,\"rows_with_data\":2,"
                         + "\"gcs_uri\":\"gs://test-vendor-bucket/from/x.csv\",\"gcs_complete\":" + gcsComplete + "}")));
+    }
+
+    /** A status carrying egress's selection block; {@code failureReason} null for a selection that resolved. */
+    private static void stubStatusWithSelection(ExportBatch batch, String phase, long distinct, String failureReason) {
+        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlEqualTo("/api/v1/egress/status/practitioner/"
+                        + batch.tenantId() + "/" + batch.egress().correlationId()))
+                .willReturn(WireMock.okJson("{\"state\":\"" + phase + "\",\"phase\":\"" + phase + "\",\"total_rows\":5,"
+                        + "\"rows_with_data\":2,\"gcs_uri\":\"gs://test-vendor-bucket/from/x.csv\",\"gcs_complete\":"
+                        + "COMPLETED".equals(phase) + ",\"selection\":{\"state\":\""
+                        + (failureReason == null ? "RESOLVED" : "FAILED") + "\",\"requested\":" + distinct
+                        + ",\"distinct\":" + distinct + ",\"matched\":" + distinct + ",\"unmatched\":0,\"parts\":1,"
+                        + "\"listUsedUri\":null,\"reusedFrom\":null,\"attempts\":1,\"failureReason\":"
+                        + (failureReason == null ? "null" : "\"" + failureReason + "\"") + "}}")));
     }
 
     private List<AuditEventType> types(ExportBatch batch) {
@@ -224,7 +232,6 @@ class DeadlineCheckJobIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 "dl-noop",
                 BatchState.EGRESS_COMPLETED,
                 1,
@@ -236,5 +243,51 @@ class DeadlineCheckJobIT {
                 0, WireMock.getRequestedFor(WireMock.urlPathMatching("/api/v1/egress/status/practitioner/dl-noop/.*")));
         Assertions.assertEquals(
                 batch.version(), batches.find(batch.id()).orElseThrow().version());
+    }
+
+    @Test
+    void completedRecordsTheStatusSelectionCounts() {
+        ExportBatch batch = requested("dl-counts", Duration.ofHours(6));
+        stubStatusWithSelection(batch, "COMPLETED", 2, null);
+
+        job.run(new DeadlineCheckJobRequest(batch.id(), 1, 1));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EGRESS_COMPLETED, after.state());
+        Assertions.assertEquals(2L, after.selection().distinct());
+    }
+
+    @Test
+    void aFilterThatMatchedNobodyEndsTheBatchEmptyFromTheDeadlinePath() {
+        ExportBatch batch = requested("dl-empty", Duration.ofHours(6));
+        stubStatusWithSelection(batch, "FAILED", 0, "NO_MATCHING_PRACTITIONERS");
+
+        job.run(new DeadlineCheckJobRequest(batch.id(), 1, 1));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.EMPTY, after.state());
+        AuditEvent empty = audit.findForBatch(batch.id(), 20).stream()
+                .filter(found -> found.type() == AuditEventType.EXPORT_BATCH_EMPTY)
+                .findFirst()
+                .orElseThrow();
+        Assertions.assertEquals("DEADLINE", empty.detail().get("completionSource"));
+        Assertions.assertTrue(types(batch).contains(AuditEventType.EXPORT_EVENT_MISSED));
+    }
+
+    @Test
+    void anUnusableReuseSourceAsksAgainFromTheDeadlinePath() {
+        ExportBatch batch = requested("dl-reuse", Duration.ofHours(6));
+        stubStatusWithSelection(batch, "FAILED", 0, "REUSE_SOURCE_UNUSABLE (source selection no longer exists)");
+
+        job.run(new DeadlineCheckJobRequest(batch.id(), 1, 1));
+
+        ExportBatch after = batches.find(batch.id()).orElseThrow();
+        Assertions.assertEquals(BatchState.SCHEDULED, after.state());
+        Assertions.assertEquals(2, after.attempt());
+        Assertions.assertEquals(
+                StateName.ENQUEUED,
+                storage.getJobById(JobIds.of(RequestEgressJob.NAME, batch.id(), 2))
+                        .getState());
+        Assertions.assertTrue(types(batch).contains(AuditEventType.EXPORT_REUSE_REFUSED));
     }
 }

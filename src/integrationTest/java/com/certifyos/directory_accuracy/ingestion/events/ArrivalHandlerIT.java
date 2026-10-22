@@ -8,7 +8,6 @@ import com.certifyos.directory_accuracy.config.DirectoryAccuracyConfig;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.events.PubSubPushMessage;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
@@ -379,13 +378,7 @@ class ArrivalHandlerIT {
     void batchNotDeliveredIsUnmatched() {
         String tenant = "arrival-early";
         ExportBatch batch = EgressFixtures.batchIn(
-                transactions,
-                batches,
-                new ExportNpiRepository(collections),
-                tenant,
-                BatchState.EGRESS_REQUESTED,
-                1,
-                InboundFixtures.DELIVERED_AT);
+                transactions, batches, tenant, BatchState.EGRESS_REQUESTED, 1, InboundFixtures.DELIVERED_AT);
         String objectName = InboundFixtures.objectName(tenant, batch.id());
         String uploadId = Ids.uploadId(InboundFixtures.VENDOR_BUCKET, objectName, "7801");
 

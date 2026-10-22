@@ -1,6 +1,6 @@
 # directory-accuracy-service
 
-The directory accuracy service: vendor export and vendor ingestion as modules of one service. Phase 1 selects practitioners per tenant on a schedule, asks the egress service to build the vendor file, and records what was sent. Phase 2 ingests the vendor's response in the same service.
+The directory accuracy service: vendor export and vendor ingestion as modules of one service. Phase 1 runs a schedule per tenant that names a saved filter (api-layer's filter module), asks the egress service to select the filter's practitioners and build the vendor file, and records what was sent and what egress counted. Phase 2 ingests the vendor's response in the same service.
 
 - Design: Confluence "CP-39602 - Design: Directory accuracy vendor export".
 - Working rules: `AGENTS.md` (the one guidance file; every rule there is enforced by a lint or a test).
@@ -9,15 +9,15 @@ The directory accuracy service: vendor export and vendor ingestion as modules of
 
 ## Shape
 
-One image, two roles chosen by Quarkus profile. `prod,api` serves HTTP behind the load balancer: operator endpoints under `/v1/vendor-exports`, the Pub/Sub push endpoint under `/internal`, health and metrics under `/q`. `prod,worker` runs the JobRunr job server and dashboard and takes no inbound traffic. Both roles share one MongoDB database, `directory_accuracy`, which holds the four service collections and JobRunr's five `jobrunr_` collections.
+One image, two roles chosen by Quarkus profile. `prod,api` serves HTTP behind the load balancer: operator endpoints under `/v1/vendor-exports`, the Pub/Sub push endpoint under `/internal`, health and metrics under `/q`. `prod,worker` runs the JobRunr job server and dashboard and takes no inbound traffic. Both roles share one MongoDB database, `directory_accuracy`, which holds the seven service collections and JobRunr's five `jobrunr_` collections.
 
 ```
-export lane        tick (06:00 UTC) or run-now -> SelectJob -> RequestEgressJob -> completion event or DeadlineCheckJob -> FinishJob
-batch states       SCHEDULED -> NPIS_SELECTED -> EGRESS_REQUESTED -> EGRESS_COMPLETED -> DELIVERED   (EMPTY, FAILED, SUPERSEDED)
+export lane        tick (06:00 UTC) or run-now -> RequestEgressJob -> completion event or DeadlineCheckJob -> FinishJob
+batch states       SCHEDULED -> EGRESS_REQUESTED -> EGRESS_COMPLETED -> DELIVERED   (EMPTY, FAILED, SUPERSEDED)
 foundations        config  persistence  audit  auth  http  clients  metrics
 ```
 
-Operators work through `/v1/vendor-exports`: schedules (create, enable, disable, preview, run-now), batches (read, list, NPIs, retry, supersede) and the tick. The procedures are in `docs/runbook.md` section 7; the contract is `openapi/openapi.yaml`.
+Operators work through `/v1/vendor-exports`: schedules (create with a saved filter id, enable, disable, run-now), batches (read, list, events, retry, supersede) and the tick. The procedures are in `docs/runbook.md` section 7; the contract is `openapi/openapi.yaml`.
 
 ## Prerequisites
 
@@ -82,10 +82,11 @@ src/main/java/com/certifyos/directory_accuracy/
   clients/      EgressClient, ApiLayerClient, ApiLayerTokenService, VendorBucket (GCS metadata), readiness
   metrics/      DirectoryAccuracyMetrics (the design's names)
   export/
-    schedule/   ScheduleResource and ScheduleService, SelectionSchema, Cadence, TemplateProvisioner (+ the mappings CSV)
-    batch/      ExportBatch and ExportNpi with their repositories, BatchLifecycle (birth, selection, request),
-                BatchCompletion (completed, failed, delivered), BatchOperations (retry, supersede), DestinationNames
-    jobs/       TickJob, SelectJob, RequestEgressJob, DeadlineCheckJob, FinishJob, ReconcilerJob, JobEnqueuer, JobIds
+    schedule/   ScheduleResource and ScheduleService, Cadence, TemplateProvisioner (+ the mappings CSV)
+    batch/      ExportBatch and its repository, BatchLifecycle (birth, pin, request, quota wait),
+                BatchCompletion (completed, empty, reuse refused, failed, delivered), BatchOperations (retry, supersede),
+                DestinationNames
+    jobs/       TickJob, RequestEgressJob, DeadlineCheckJob, FinishJob, ReconcilerJob, JobEnqueuer, JobIds
     events/     EgressEventResource -> EgressEventHandler (the design's handler table)
     api/        VendorExportsResource (batches), ExportOpsResource (tick), BatchViews
 terraform/internal/   the internal environment

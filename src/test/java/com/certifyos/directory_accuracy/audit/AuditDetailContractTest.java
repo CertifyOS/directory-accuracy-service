@@ -95,6 +95,8 @@ class AuditDetailContractTest {
                 .detail("outputUri", null)
                 .detail("totalRecords", null)
                 .detail("totalRows", null)
+                .detail("failureReason", "FILTER_NOT_USABLE")
+                .detail("selectionDistinct", null)
                 .build();
         Assertions.assertFalse(event.detail().containsKey("outputUri"));
         Assertions.assertEquals("FAILED", event.detail().get("phase"));
@@ -103,18 +105,16 @@ class AuditDetailContractTest {
     @Test
     void extraKeysAreAllowed() {
         AuditEvent event = AuditEvent.forBatch(
-                        AuditEventType.NPIS_REGISTERED, "org-1", "candor", "org-1-candor-2026-10-001", 1)
-                .detail("page", 0)
-                .detail("count", 2)
-                .detail("firstNpi", "1234567893")
-                .detail("lastNpi", "2345678918")
-                .detail("inserted", 2L)
-                .detail("skippedNoNpi", 0)
+                        AuditEventType.EXPORT_RECONCILED, "org-1", "candor", "org-1-candor-2026-10-001", 1)
+                .detail("selected", 2L)
+                .detail("inFile", 2L)
+                .detail("match", true)
+                .detail("fileProducedBy", "org-1-candor-2026-10-001-r1")
                 .build();
-        Assertions.assertEquals(2L, event.detail().get("inserted"));
+        Assertions.assertEquals("org-1-candor-2026-10-001-r1", event.detail().get("fileProducedBy"));
         Assertions.assertEquals(
-                Set.of("page", "count", "firstNpi", "lastNpi"),
-                AuditDetailContract.requiredKeys(AuditEventType.NPIS_REGISTERED));
+                Set.of("selected", "inFile", "match"),
+                AuditDetailContract.requiredKeys(AuditEventType.EXPORT_RECONCILED));
     }
 
     @Test

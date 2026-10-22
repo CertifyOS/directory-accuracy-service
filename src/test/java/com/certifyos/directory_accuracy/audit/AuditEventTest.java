@@ -14,8 +14,8 @@ class AuditEventTest {
     static final String FIELD_ID = "org-xyz|candor|org-xyz-candor-2026-10-001|cert-000123|loc-7781|phone";
 
     @Test
-    void catalogueHasTheDesignsFortyThreeTypes() {
-        Assertions.assertEquals(43, AuditEventType.values().length, "24 export types and 19 ingestion types");
+    void catalogueHasTheDesignsFortyTwoTypes() {
+        Assertions.assertEquals(42, AuditEventType.values().length, "23 export types and 19 ingestion types");
         Assertions.assertEquals(AuditEventType.Scope.SCHEDULE, AuditEventType.SCHEDULE_CREATED.scope());
         Assertions.assertEquals(AuditEventType.Scope.BATCH, AuditEventType.EXPORT_BATCH_DELIVERED.scope());
         Assertions.assertEquals(AuditEventType.Scope.SERVICE, AuditEventType.EXPORT_TICK_COMPLETED.scope());
@@ -186,7 +186,7 @@ class AuditEventTest {
                 .details(detail)
                 .detail("cadence", "monthly")
                 .detail("timezone", "UTC")
-                .detail("selection", "s")
+                .detail("filterId", "flt-1")
                 .detail("egressTemplateId", "tpl")
                 .detail("nextDueAt", "n")
                 .build();

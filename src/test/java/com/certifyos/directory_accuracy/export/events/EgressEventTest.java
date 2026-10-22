@@ -27,6 +27,22 @@ class EgressEventTest {
     }
 
     @Test
+    void parsesTheFailureReasonAndSelectionBlock() throws Exception {
+        String body =
+                """
+                {"schemaVersion":"1","type":"EXPORT_FAILED","tenantId":"org-a",
+                 "correlationId":"org-a-candor-2026-10-001-r2","phase":"FAILED",
+                 "failureMessage":"selection failed","failureReason":"REUSE_SOURCE_UNUSABLE (source list is empty)",
+                 "selection":{"requested":0,"distinct":0,"matched":0,"unmatched":0,"parts":0,
+                  "listUsedUri":null,"reusedFrom":"org-a-candor-2026-10-001-r1"},
+                 "completedAt":"2026-10-01T07:12:00Z"}
+                """;
+        EgressEvent event = mapper.readValue(body, EgressEvent.class);
+        Assertions.assertEquals("REUSE_SOURCE_UNUSABLE (source list is empty)", event.failureReason());
+        Assertions.assertEquals("org-a-candor-2026-10-001-r1", event.selection().reusedFrom());
+    }
+
+    @Test
     void envelopeAttributesAreNeverNull() throws Exception {
         PubSubPushMessage envelope = mapper.readValue(
                 """

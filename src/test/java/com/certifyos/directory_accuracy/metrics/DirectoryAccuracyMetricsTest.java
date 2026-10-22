@@ -22,7 +22,6 @@ class DirectoryAccuracyMetricsTest {
             DirectoryAccuracyMetrics.SCHEDULES_BY_STATE,
             DirectoryAccuracyMetrics.BATCHES_CREATED,
             DirectoryAccuracyMetrics.SELECTION_PRACTITIONERS,
-            DirectoryAccuracyMetrics.SELECTION_PAGES,
             DirectoryAccuracyMetrics.EGRESS_WAIT_SECONDS,
             DirectoryAccuracyMetrics.EGRESS_FAILED,
             DirectoryAccuracyMetrics.COMPLETION_SOURCE,
@@ -65,14 +64,13 @@ class DirectoryAccuracyMetricsTest {
     void everyDesignNameIsReachable() {
         metrics.batchCreated("org-a", "candor");
         metrics.selectionPractitioners("org-a", "candor", 1240);
-        metrics.selectionPage("org-a");
         metrics.egressWaitSeconds("org-a", 712);
         metrics.egressFailed("org-a", "EGRESS_DID_NOT_FINISH");
         metrics.completion("EVENT");
         metrics.eventRejected("UNKNOWN_CORRELATION");
         metrics.reconcileMismatch("org-a");
-        metrics.jobRetry("SelectJob");
-        metrics.jobFinalFailure("SelectJob");
+        metrics.jobRetry("RequestEgressJob");
+        metrics.jobFinalFailure("RequestEgressJob");
         metrics.registerGauge(DirectoryAccuracyMetrics.BATCHES_BY_STATE, Tags.of("state", "SCHEDULED"), () -> 2);
         metrics.registerGauge(DirectoryAccuracyMetrics.SCHEDULES_BY_STATE, Tags.of("state", "ENABLED"), () -> 1);
         Set<String> registered = names();

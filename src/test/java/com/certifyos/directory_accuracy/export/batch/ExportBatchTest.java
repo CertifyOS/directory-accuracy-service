@@ -2,9 +2,6 @@ package com.certifyos.directory_accuracy.export.batch;
 
 import com.certifyos.directory_accuracy.export.batch.EgressDetails.CompletionSource;
 import com.certifyos.directory_accuracy.export.batch.EgressDetails.Destination;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.List;
@@ -14,12 +11,11 @@ import org.junit.jupiter.api.Test;
 
 class ExportBatchTest {
 
-    static final SelectionCriteria CRITERIA = new SelectionCriteria(
-            List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct", "Delegated"))));
+    static final String FILTER_ID = "flt-direct";
 
     static ExportBatch scheduled() {
         return ExportBatch.scheduled(
-                "org-xyz", "candor", YearMonth.of(2026, 10), 1, CRITERIA, Instant.parse("2026-10-01T06:00:12Z"));
+                "org-xyz", "candor", YearMonth.of(2026, 10), 1, FILTER_ID, Instant.parse("2026-10-01T06:00:12Z"));
     }
 
     @Test
@@ -30,7 +26,8 @@ class ExportBatchTest {
         Assertions.assertEquals(BatchState.SCHEDULED, batch.state());
         Assertions.assertEquals(1, batch.attempt());
         Assertions.assertEquals(1L, batch.version());
-        Assertions.assertEquals(CRITERIA, batch.selection().criteria(), "criteria copied at creation");
+        Assertions.assertEquals(FILTER_ID, batch.selection().filterId(), "filter id copied at creation");
+        Assertions.assertFalse(batch.selection().hasCounts(), "no counts before egress");
         Assertions.assertNull(batch.egress());
         Assertions.assertNull(batch.reconciliation());
     }
@@ -41,6 +38,7 @@ class ExportBatchTest {
         Assertions.assertFalse(doc.containsKey("egress"));
         Assertions.assertFalse(doc.containsKey("failedStep"));
         Assertions.assertFalse(doc.containsKey("deliveredAt"));
+        Assertions.assertEquals(new Document("filterId", FILTER_ID), doc.get("selection", Document.class));
         Assertions.assertEquals(scheduled(), ExportBatch.fromDocument(doc));
     }
 
@@ -55,7 +53,16 @@ class ExportBatchTest {
                 1,
                 BatchState.DELIVERED,
                 1,
-                new ExportBatch.Selection(CRITERIA, null, 1240, Instant.parse("2026-10-01T06:00:41Z")),
+                new ExportBatch.Selection(
+                        FILTER_ID,
+                        1250L,
+                        1240L,
+                        10L,
+                        1L,
+                        "org-xyz-candor-2026-10-001-r1",
+                        "gs://egress-list-used/org-xyz-candor-2026-10-001-r2.csv",
+                        null,
+                        Instant.parse("2026-10-01T07:11:52Z")),
                 new EgressDetails(
                         "org-xyz-candor-2026-10-001-r1",
                         "practitioner:org-xyz:org-xyz-candor-2026-10-001-r1",

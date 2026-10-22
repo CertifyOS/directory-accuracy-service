@@ -21,7 +21,6 @@ public final class Ids {
     private static final TimeBasedEpochGenerator EVENT_IDS = Generators.timeBasedEpochGenerator();
     private static final Pattern NO_UNDERSCORE = Pattern.compile("^[A-Za-z0-9-]+$");
     private static final Pattern VENDOR = Pattern.compile("^[a-z0-9-]+$");
-    private static final Pattern NPI = Pattern.compile("^\\d{10}$");
     private static final String NO_VALUE = "-";
 
     private Ids() {}
@@ -62,20 +61,6 @@ public final class Ids {
         }
         return requireTenant(tenantId) + "-" + requireVendor(vendor) + "-" + period + "-"
                 + String.format(Locale.ROOT, "%03d", seq);
-    }
-
-    /**
-     * NPI registry id: {@code <exportBatchId>|<npi>}, so a repeated upsert is a no-op.
-     *
-     * @param exportBatchId the batch
-     * @param npi the ten-digit NPI
-     * @return the registry id
-     */
-    public static String npiId(String exportBatchId, String npi) {
-        if (!NPI.matcher(npi).matches()) {
-            throw new IllegalArgumentException("npi must be ten digits, got " + npi);
-        }
-        return exportBatchId + "|" + npi;
     }
 
     /**

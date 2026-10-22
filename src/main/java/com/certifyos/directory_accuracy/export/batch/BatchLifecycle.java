@@ -3,11 +3,12 @@ package com.certifyos.directory_accuracy.export.batch;
 import com.certifyos.directory_accuracy.audit.AuditEvent;
 import com.certifyos.directory_accuracy.audit.AuditEventType;
 import com.certifyos.directory_accuracy.audit.AuditRepository;
+import com.certifyos.directory_accuracy.clients.EgressExportRequest;
 import com.certifyos.directory_accuracy.clients.EgressTemplate;
 import com.certifyos.directory_accuracy.clients.VendorBucket;
 import com.certifyos.directory_accuracy.export.jobs.JobEnqueuer;
 import com.certifyos.directory_accuracy.export.jobs.JobIds;
-import com.certifyos.directory_accuracy.export.jobs.SelectJob;
+import com.certifyos.directory_accuracy.export.jobs.RequestEgressJob;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
 import com.certifyos.directory_accuracy.export.schedule.ScheduleRepository;
 import com.certifyos.directory_accuracy.metrics.DirectoryAccuracyMetrics;
@@ -19,7 +20,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.bson.Document;
@@ -44,7 +44,6 @@ public class BatchLifecycle {
     private static final Logger LOG = Logger.getLogger(BatchLifecycle.class);
 
     private final ExportBatchRepository batches;
-    private final ExportNpiRepository npis;
     private final ScheduleRepository schedules;
     private final AuditRepository audit;
     private final Transactions transactions;
@@ -53,14 +52,12 @@ public class BatchLifecycle {
 
     public BatchLifecycle(
             ExportBatchRepository batches,
-            ExportNpiRepository npis,
             ScheduleRepository schedules,
             AuditRepository audit,
             Transactions transactions,
             JobEnqueuer enqueuer,
             DirectoryAccuracyMetrics metrics) {
         this.batches = batches;
-        this.npis = npis;
         this.schedules = schedules;
         this.audit = audit;
         this.transactions = transactions;
@@ -72,7 +69,7 @@ public class BatchLifecycle {
      * A batch that was just scheduled.
      *
      * @param batch the inserted row
-     * @param jobId its select job
+     * @param jobId its egress request job
      * @param nextDueAt the schedule's new due instant
      */
     public record Scheduled(ExportBatch batch, UUID jobId, Instant nextDueAt) {}
@@ -80,7 +77,7 @@ public class BatchLifecycle {
     /**
      * Creates a batch for a schedule's period: inserts the row in {@code SCHEDULED}, advances the
      * schedule ({@code nextDueAt}, {@code lastBatchId}, {@code lastRunAt}) and writes
-     * {@code EXPORT_BATCH_SCHEDULED} in one transaction, then enqueues the select job.
+     * {@code EXPORT_BATCH_SCHEDULED} in one transaction, then enqueues the egress request job.
      *
      * @param schedule the schedule as the caller read it; its version is the compare-and-set token
      * @param period the month the batch is for
@@ -103,9 +100,9 @@ public class BatchLifecycle {
             Instant now,
             AuditEvent companion) {
         ExportBatch batch =
-                ExportBatch.scheduled(schedule.tenantId(), schedule.vendor(), period, seq, schedule.selection(), now);
+                ExportBatch.scheduled(schedule.tenantId(), schedule.vendor(), period, seq, schedule.filterId(), now);
         Instant nextDueAt = schedule.cadence().nextAfterPeriod(now, schedule.timezone(), period);
-        UUID jobId = JobIds.of(SelectJob.NAME, batch.id(), batch.attempt());
+        UUID jobId = JobIds.of(RequestEgressJob.NAME, batch.id(), batch.attempt());
         AuditEvent event = AuditEvent.forBatch(
                         AuditEventType.EXPORT_BATCH_SCHEDULED,
                         schedule.tenantId(),
@@ -138,9 +135,11 @@ public class BatchLifecycle {
             LOG.warnf("%s already exists; %s trigger wrote nothing", batch.id(), trigger);
             return Optional.empty();
         }
-        enqueuer.select(batch.id(), batch.attempt());
+        enqueuer.requestEgress(batch.id(), batch.attempt());
         metrics.batchCreated(schedule.tenantId(), schedule.vendor());
-        LOG.infof("%s scheduled by %s (%s), select job %s, next due %s", batch.id(), actor, trigger, jobId, nextDueAt);
+        LOG.infof(
+                "%s scheduled by %s (%s), egress request job %s, next due %s",
+                batch.id(), actor, trigger, jobId, nextDueAt);
         return Optional.of(new Scheduled(batch, jobId, nextDueAt));
     }
 
@@ -169,113 +168,6 @@ public class BatchLifecycle {
             return Optional.of(nextDueAt);
         }
         return Optional.empty();
-    }
-
-    /**
-     * One api-layer page registered: the rows upserted (a repeated page inserts nothing new), the
-     * page cursor saved on the batch so a retry resumes after it, and {@code NPIS_REGISTERED} when
-     * the page had rows, in one transaction. The batch must still be {@code SCHEDULED}.
-     *
-     * @param batch the batch
-     * @param page the page just fetched
-     * @param rows the practitioners on it with a valid NPI
-     * @param skipped practitioners on the page without a usable NPI
-     * @param now the time of the write
-     * @return how many rows were new
-     */
-    public long registerPage(ExportBatch batch, int page, List<ExportNpi> rows, int skipped, Instant now) {
-        long inserted = transactions.run(session -> {
-            long fresh = npis.upsertAll(session, rows);
-            boolean still = batches.updateInState(
-                    session, batch.id(), BatchState.SCHEDULED, now, Updates.set("selection.page", page));
-            if (!still) {
-                throw new IllegalStateException(batch.id() + " left SCHEDULED during selection");
-            }
-            if (!rows.isEmpty()) {
-                audit.write(
-                        session,
-                        AuditEvent.forBatch(
-                                        AuditEventType.NPIS_REGISTERED,
-                                        batch.tenantId(),
-                                        batch.vendor(),
-                                        batch.id(),
-                                        batch.attempt())
-                                .occurredAt(now)
-                                .detail("page", page)
-                                .detail("count", rows.size())
-                                .detail("inserted", fresh)
-                                .detail("skippedNoNpi", skipped)
-                                .detail("firstNpi", rows.get(0).npi())
-                                .detail("lastNpi", rows.get(rows.size() - 1).npi())
-                                .build());
-            }
-            return fresh;
-        });
-        metrics.selectionPage(batch.tenantId());
-        return inserted;
-    }
-
-    /**
-     * Selection finished with practitioners: {@code SCHEDULED} to {@code NPIS_SELECTED} with the
-     * counts and {@code EXPORT_SELECTION_COMPLETED}, then the egress request job.
-     *
-     * @param batch the batch
-     * @param pages pages fetched over all attempts
-     * @param practitioners rows in the registry
-     * @param durationMs this attempt's wall time
-     * @param now the time of the write
-     * @return the egress request job id
-     */
-    public UUID completeSelection(ExportBatch batch, int pages, long practitioners, long durationMs, Instant now) {
-        Bson updates = Updates.combine(
-                Updates.set("selection.practitionersSelected", practitioners),
-                Updates.set("selection.completedAt", now),
-                Updates.unset("selection.page"));
-        AuditEvent event = AuditEvent.forBatch(
-                        AuditEventType.EXPORT_SELECTION_COMPLETED,
-                        batch.tenantId(),
-                        batch.vendor(),
-                        batch.id(),
-                        batch.attempt())
-                .occurredAt(now)
-                .detail("criteria", batch.selection().criteria().toDocuments())
-                .detail("pages", pages)
-                .detail("practitionersSelected", practitioners)
-                .detail("durationMs", durationMs)
-                .build();
-        transition(batch, BatchState.NPIS_SELECTED, updates, event, now);
-        UUID jobId = enqueuer.requestEgress(batch.id(), batch.attempt());
-        metrics.selectionPractitioners(batch.tenantId(), batch.vendor(), practitioners);
-        LOG.infof(
-                "%s selected %d practitioners over %d pages, egress request job %s",
-                batch.id(), practitioners, pages, jobId);
-        return jobId;
-    }
-
-    /**
-     * Selection finished with nobody: {@code SCHEDULED} to {@code EMPTY} with
-     * {@code EXPORT_BATCH_EMPTY}. No job follows; the period is done.
-     *
-     * @param batch the batch
-     * @param now the time of the write
-     */
-    public void markEmpty(ExportBatch batch, Instant now) {
-        Bson updates = Updates.combine(
-                Updates.set("selection.practitionersSelected", 0L),
-                Updates.set("selection.completedAt", now),
-                Updates.unset("selection.page"));
-        AuditEvent event = AuditEvent.forBatch(
-                        AuditEventType.EXPORT_BATCH_EMPTY,
-                        batch.tenantId(),
-                        batch.vendor(),
-                        batch.id(),
-                        batch.attempt())
-                .occurredAt(now)
-                .detail("criteria", batch.selection().criteria().toDocuments())
-                .build();
-        transition(batch, BatchState.EMPTY, updates, event, now);
-        metrics.selectionPractitioners(batch.tenantId(), batch.vendor(), 0);
-        LOG.infof("%s selected nobody; EMPTY", batch.id());
     }
 
     private void transition(ExportBatch batch, BatchState to, Bson updates, AuditEvent event, Instant now) {
@@ -307,7 +199,7 @@ public class BatchLifecycle {
     /**
      * Pins the template and the destination on the batch before the first egress call, so every
      * attempt sends the same values and a retry never re-reads the template. Written with
-     * {@code updateInState} on {@code NPIS_SELECTED}; no audit event, the request event carries the
+     * {@code updateInState} on {@code SCHEDULED}; no audit event, the request event carries the
      * template id.
      *
      * @param batch the batch
@@ -335,9 +227,9 @@ public class BatchLifecycle {
                 Updates.set("file.name", fileName),
                 Updates.set("file.path", DestinationNames.gsPath(vendorBucket, objectName)));
         boolean still = transactions.run(
-                session -> batches.updateInState(session, batch.id(), BatchState.NPIS_SELECTED, now, updates));
+                session -> batches.updateInState(session, batch.id(), BatchState.SCHEDULED, now, updates));
         if (!still) {
-            throw new IllegalStateException(batch.id() + " left NPIS_SELECTED before the template was pinned");
+            throw new IllegalStateException(batch.id() + " left SCHEDULED before the template was pinned");
         }
         LOG.infof(
                 "%s pinned template %s v%s, destination %s", batch.id(), template.id(), template.version(), objectName);
@@ -345,14 +237,17 @@ public class BatchLifecycle {
     }
 
     /**
-     * Egress accepted (or already held) the request: {@code NPIS_SELECTED} to {@code EGRESS_REQUESTED}
+     * Egress accepted (or already held) the request: {@code SCHEDULED} to {@code EGRESS_REQUESTED}
      * with the correlation id, job reference, request time and the deadline job id, plus
-     * {@code EXPORT_EGRESS_REQUESTED}; then the first deadline check is scheduled.
+     * {@code EXPORT_EGRESS_REQUESTED}; then the first deadline check is scheduled. A retry that sent
+     * the filter id rather than {@code reuseSelectionFrom} could not reuse the earlier list, and
+     * the batch records {@code selection.reEvaluated}. An earlier attempt's selection counts are
+     * cleared: this attempt's arrive with its completion.
      *
      * @param batch the batch, pinned
      * @param correlationId this attempt's egress correlation id
      * @param jobReference what egress called the job
-     * @param npiCount NPIs sent in the filter
+     * @param selection the selection sent
      * @param egressResponse a short description of egress's answer, for the event
      * @param deadlineAt when the first deadline check runs
      * @param now the time of the write
@@ -361,18 +256,29 @@ public class BatchLifecycle {
             ExportBatch batch,
             String correlationId,
             String jobReference,
-            int npiCount,
+            EgressExportRequest.Selection selection,
             String egressResponse,
             Instant deadlineAt,
             Instant now) {
         UUID deadlineJobId = JobIds.deadline(batch.id(), batch.attempt(), 1);
+        boolean reEvaluated = batch.attempt() > 1 && selection.reuseSelectionFrom() == null;
         Bson updates = Updates.combine(
                 Updates.set("egress.correlationId", correlationId),
                 Updates.set("egress.jobReference", jobReference),
                 Updates.set("egress.requestedAt", now),
                 Updates.set("egress.deadlineJobId", deadlineJobId.toString()),
                 Updates.unset("egress.completedAt"),
-                Updates.unset("egress.completionSource"));
+                Updates.unset("egress.completionSource"),
+                reEvaluated ? Updates.set("selection.reEvaluated", true) : Updates.unset("selection.reEvaluated"),
+                // A new attempt's counts come from its own completion; an earlier attempt's would
+                // otherwise stand in for them when the event carries no selection block.
+                Updates.unset("selection.requested"),
+                Updates.unset("selection.distinct"),
+                Updates.unset("selection.unmatched"),
+                Updates.unset("selection.parts"),
+                Updates.unset("selection.reusedFrom"),
+                Updates.unset("selection.listUsedUri"),
+                Updates.unset("selection.completedAt"));
         AuditEvent event = AuditEvent.forBatch(
                         AuditEventType.EXPORT_EGRESS_REQUESTED,
                         batch.tenantId(),
@@ -383,7 +289,8 @@ public class BatchLifecycle {
                 .detail("egressCorrelationId", correlationId)
                 .detail("templateId", batch.egress().templateId())
                 .detail("templateVersion", batch.egress().templateVersion())
-                .detail("npiCount", npiCount)
+                .detail("filterId", batch.selection().filterId())
+                .detail("reuseSelectionFrom", selection.reuseSelectionFrom())
                 .detail("egressResponse", egressResponse)
                 .detail("destination", batch.egress().destination().toDocument())
                 .detail("deadlineAt", deadlineAt)
@@ -419,7 +326,7 @@ public class BatchLifecycle {
 
     /**
      * A retry found the prior attempt's complete file already at the destination, so there is
-     * nothing to ask egress for: {@code NPIS_SELECTED} to {@code EGRESS_REQUESTED} to
+     * nothing to ask egress for: {@code SCHEDULED} to {@code EGRESS_REQUESTED} to
      * {@code EGRESS_COMPLETED} in one transaction (the state machine has no shortcut), with
      * {@code completionSource = PRIOR_ATTEMPT} and {@code EXPORT_EGRESS_COMPLETED}; then the finish
      * job.
@@ -459,7 +366,7 @@ public class BatchLifecycle {
                 .build();
         boolean moved = transactions.run(session -> {
             boolean first = batches.transition(
-                    session, batch.id(), BatchState.NPIS_SELECTED, BatchState.EGRESS_REQUESTED, now, null);
+                    session, batch.id(), BatchState.SCHEDULED, BatchState.EGRESS_REQUESTED, now, null);
             boolean second = first
                     && batches.transition(
                             session,
@@ -474,7 +381,7 @@ public class BatchLifecycle {
             return second;
         });
         if (!moved) {
-            throw new IllegalStateException(batch.id() + " is no longer NPIS_SELECTED; EGRESS_COMPLETED not written");
+            throw new IllegalStateException(batch.id() + " is no longer SCHEDULED; EGRESS_COMPLETED not written");
         }
         UUID jobId = enqueuer.finish(batch.id(), batch.attempt());
         metrics.completion(EgressDetails.CompletionSource.PRIOR_ATTEMPT.name());
@@ -487,5 +394,24 @@ public class BatchLifecycle {
     /** Egress refused the request; counted so the dashboard sees it before the retries run out. */
     public void egressRefused(ExportBatch batch, String reason) {
         metrics.egressFailed(batch.tenantId(), reason);
+    }
+
+    /**
+     * Egress is already running the tenant's maximum of selection exports ({@code 429}): a new
+     * egress request job is scheduled after egress's {@code Retry-After}, so the wait spends none of
+     * JobRunr's retries. The batch stays {@code SCHEDULED}.
+     *
+     * @param batch the batch
+     * @param wait the number of this wait, from 1
+     * @param at when to ask again
+     * @return the scheduled job id
+     */
+    public UUID waitForEgressQuota(ExportBatch batch, int wait, Instant at) {
+        egressRefused(batch, "SELECTION_QUOTA_EXCEEDED");
+        UUID jobId = enqueuer.requestEgressAfterQuota(batch.id(), batch.attempt(), wait, at);
+        LOG.infof(
+                "%s: egress selection quota reached; wait %d, asking again at %s (job %s)",
+                batch.id(), wait, at, jobId);
+        return jobId;
     }
 }

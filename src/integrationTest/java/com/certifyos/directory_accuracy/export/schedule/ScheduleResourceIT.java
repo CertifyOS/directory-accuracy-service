@@ -50,7 +50,7 @@ class ScheduleResourceIT {
     static final String TEMPLATES = "/api/v1/egress-templates";
     static final String VALID_BODY =
             "{\"cadence\":{\"type\":\"monthly\",\"dayOfMonth\":1},\"timezone\":\"America/New_York\","
-                    + "\"selection\":{\"data.delegationStatus\":{\"in\":[\"Direct\"]},\"credentialingStatus\":{\"eq\":\"Approved\"}}}";
+                    + "\"filterId\":\"flt-sched-direct\"}";
 
     @InjectMock
     GoogleIdTokenService google;
@@ -119,8 +119,8 @@ class ScheduleResourceIT {
                 .body("cadence.type", Matchers.equalTo("monthly"))
                 .body("cadence.dayOfMonth", Matchers.equalTo(1))
                 .body("timezone", Matchers.equalTo("America/New_York"))
-                .body("selection.'data.delegationStatus'.in", Matchers.contains("Direct"))
-                .body("selection.credentialingStatus.eq", Matchers.equalTo("Approved"))
+                .body("filterId", Matchers.equalTo("flt-sched-direct"))
+                .body("$", Matchers.not(Matchers.hasKey("selection")))
                 .body("nextDueAt", Matchers.endsWith("T04:00:00Z"))
                 .body("lastBatchId", Matchers.nullValue());
 
@@ -143,6 +143,7 @@ class ScheduleResourceIT {
         Assertions.assertEquals("sched@certifyos.com", events.get(0).actor());
         Assertions.assertEquals("tpl-created", events.get(0).detail().get("egressTemplateId"));
         Assertions.assertTrue((Boolean) events.get(0).detail().get("templateCreated"));
+        Assertions.assertEquals("flt-sched-direct", events.get(0).detail().get("filterId"));
 
         member().get(BASE + "create").then().statusCode(200).body("egressTemplateId", Matchers.equalTo("tpl-created"));
         member().get("/v1/vendor-exports/schedules")
@@ -174,7 +175,7 @@ class ScheduleResourceIT {
 
         String replaced =
                 "{\"version\":1,\"cadence\":{\"type\":\"cron\",\"expression\":\"0 6 1 * *\"},\"timezone\":\"UTC\","
-                        + "\"selection\":{\"rosterIds\":{\"in\":[\"8b1f9f2e-8f0e-4d0a-9f0f-2f6a4a1d9c11\"]}}}";
+                        + "\"filterId\":\"flt-sched-roster\"}";
         put("replace", replaced)
                 .then()
                 .statusCode(200)
@@ -184,12 +185,30 @@ class ScheduleResourceIT {
                 .body("timezone", Matchers.equalTo("UTC"))
                 .body("nextDueAt", Matchers.endsWith("-01T06:00:00Z"))
                 .body("egressTemplateId", Matchers.equalTo("tpl-replace"))
+                .body("filterId", Matchers.equalTo("flt-sched-roster"))
                 .body("enabled", Matchers.equalTo(true));
+
+        String dueBefore = member().get(BASE + "replace").then().extract().path("nextDueAt");
+        put(
+                        "replace",
+                        replaced.replace("\"version\":1", "\"version\":2")
+                                .replace("flt-sched-roster", "flt-sched-later"))
+                .then()
+                .statusCode(200)
+                .body("version", Matchers.equalTo(3))
+                .body("filterId", Matchers.equalTo("flt-sched-later"))
+                .body("nextDueAt", Matchers.equalTo(dueBefore));
 
         List<AuditEvent> events = audit.findForSchedule(TENANT, "replace", 10);
         Assertions.assertTrue(
                 events.stream().anyMatch(event -> event.type() == AuditEventType.SCHEDULE_UPDATED),
                 "an UPDATED event is written");
+        Assertions.assertTrue(
+                events.stream()
+                        .filter(event -> event.type() == AuditEventType.SCHEDULE_UPDATED)
+                        .anyMatch(event ->
+                                String.valueOf(event.detail().get("changes")).contains("flt-sched-later")),
+                "the filter id change is in the diff");
     }
 
     @Test
@@ -235,15 +254,15 @@ class ScheduleResourceIT {
     @TestSecurity(user = "ops")
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "sched@certifyos.com")})
     void invalidBodiesAreRefusedWithTheirCodes() {
-        put(
-                        "invalid",
-                        "{\"cadence\":{\"type\":\"monthly\",\"dayOfMonth\":1},\"timezone\":\"UTC\","
-                                + "\"selection\":{\"data.secret\":{\"eq\":\"x\"}}}")
+        put("invalid", VALID_BODY.replace("flt-sched-direct", "flt.sched/direct"))
                 .then()
                 .statusCode(400)
                 .contentType(Problem.MEDIA_TYPE)
-                .body("code", Matchers.equalTo("SELECTION_INVALID"))
-                .body("detail", Matchers.containsString("data.secret"));
+                .body("code", Matchers.equalTo("FILTER_ID_INVALID"));
+        put("invalid", "{\"cadence\":{\"type\":\"monthly\",\"dayOfMonth\":1},\"timezone\":\"UTC\"}")
+                .then()
+                .statusCode(400)
+                .body("code", Matchers.equalTo("FILTER_ID_INVALID"));
         put("invalid", VALID_BODY.replace("America/New_York", "Mars/Olympus"))
                 .then()
                 .statusCode(400)
@@ -252,11 +271,12 @@ class ScheduleResourceIT {
                 .then()
                 .statusCode(400)
                 .body("code", Matchers.equalTo("CADENCE_INVALID"));
-        put("invalid", "{\"timezone\":\"UTC\",\"selection\":{\"credentialingStatus\":{\"eq\":\"A\"}}}")
+        put("invalid", "{\"timezone\":\"UTC\",\"filterId\":\"flt-sched-direct\"}")
                 .then()
                 .statusCode(400)
                 .body("code", Matchers.equalTo("CADENCE_INVALID"));
         put("with_underscore", VALID_BODY).then().statusCode(400).body("code", Matchers.equalTo("INVALID_REQUEST"));
+        WireMockUpstreams.verify(0, WireMock.anyRequestedFor(WireMock.urlPathMatching(TEMPLATES + ".*")));
     }
 
     @Test
@@ -306,29 +326,6 @@ class ScheduleResourceIT {
                 .toList();
         Assertions.assertTrue(types.contains(AuditEventType.SCHEDULE_DISABLED), types.toString());
         Assertions.assertTrue(types.contains(AuditEventType.SCHEDULE_ENABLED), types.toString());
-    }
-
-    @Test
-    @TestSecurity(user = "ops")
-    @JwtSecurity(claims = {@Claim(key = EMAIL, value = "sched@certifyos.com")})
-    void previewCountsThroughApiLayerWithPageSizeOne() {
-        WireMockUpstreams.stubFor(WireMock.get(WireMock.urlPathEqualTo("/practitioners"))
-                .withHeader("tenant-id", WireMock.equalTo(TENANT))
-                .withQueryParam("size", WireMock.equalTo("1"))
-                .withQueryParam("filter", WireMock.equalToJson("{\"credentialingStatus\":{\"eq\":\"Approved\"}}"))
-                .willReturn(WireMock.okJson("{\"data\":[{\"id\":\"p1\",\"npi\":\"1\"}],\"totalCount\":1234}")));
-
-        member().body("{\"selection\":{\"credentialingStatus\":{\"eq\":\"Approved\"}}}")
-                .post(BASE + "preview-any/preview")
-                .then()
-                .statusCode(200)
-                .body("totalCount", Matchers.equalTo(1234));
-
-        member().body("{}")
-                .post(BASE + "preview-none/preview")
-                .then()
-                .statusCode(404)
-                .body("code", Matchers.equalTo("SCHEDULE_NOT_FOUND"));
     }
 
     @Test

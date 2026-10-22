@@ -33,11 +33,8 @@ class IdsTest {
     }
 
     @Test
-    void scheduleAndNpiIdsUseThePipeSeparator() {
+    void scheduleIdUsesThePipeSeparator() {
         Assertions.assertEquals("org-xyz|candor", Ids.scheduleId("org-xyz", "candor"));
-        Assertions.assertEquals(
-                "org-xyz-candor-2026-10-001|1234567893", Ids.npiId("org-xyz-candor-2026-10-001", "1234567893"));
-        Assertions.assertThrows(IllegalArgumentException.class, () -> Ids.npiId("b", "12345"));
     }
 
     @Test

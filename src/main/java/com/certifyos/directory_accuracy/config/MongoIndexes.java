@@ -14,7 +14,7 @@ import org.bson.conversions.Bson;
  * Every index the design names, created on every boot of either role. Safe: MongoDB joins an
  * in-progress identical build and is a no-op against an existing one, so several instances calling
  * {@code createIndex} with the same spec at once is fine (JobRunr does the same in this database).
- * These are correctness guards (uniqueness of batches and NPIs, idempotency of received events), so
+ * These are correctness guards (uniqueness of batches, idempotency of received events), so
  * they stay synchronous at boot. Any index added after go-live is built out of band first: a boot
  * time build over a large collection would hold the instance's health check hostage. Index options
  * never change in place (MongoDB refuses with IndexOptionsConflict); a changed index is a new name.
@@ -62,12 +62,6 @@ public class MongoIndexes {
                 .createIndex(
                         Indexes.ascending("tenantId", "deliveredAt"),
                         new IndexOptions().name("batches_tenant_delivered_at"));
-
-        // npis: _id = batch|npi is unique by construction
-        collections.npis().createIndex(Indexes.ascending("exportBatchId"), new IndexOptions().name("npis_batch"));
-        collections
-                .npis()
-                .createIndex(Indexes.ascending("tenantId", "npi"), new IndexOptions().name("npis_tenant_npi"));
 
         // events
         collections

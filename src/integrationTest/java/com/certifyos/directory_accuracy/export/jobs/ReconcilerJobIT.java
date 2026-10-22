@@ -5,9 +5,6 @@ import com.certifyos.directory_accuracy.MongoResource;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -30,8 +27,7 @@ import org.junit.jupiter.api.Test;
 @TestProfile(ApiTestProfile.class)
 public class ReconcilerJobIT {
 
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
     static final YearMonth PERIOD = YearMonth.of(2026, 10);
 
     @Inject
@@ -48,7 +44,7 @@ public class ReconcilerJobIT {
 
     private ExportBatch staleIn(String tenantId, BatchState state) {
         Instant old = Instant.now().minusSeconds(3600);
-        ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", PERIOD, 1, CRITERIA, old);
+        ExportBatch batch = ExportBatch.scheduled(tenantId, "candor", PERIOD, 1, FILTER_ID, old);
         transactions.run(session -> {
             batches.insert(session, batch);
             BatchState current = BatchState.SCHEDULED;
@@ -64,10 +60,8 @@ public class ReconcilerJobIT {
     private static List<BatchState> path(BatchState target) {
         return switch (target) {
             case SCHEDULED -> List.of();
-            case NPIS_SELECTED -> List.of(BatchState.NPIS_SELECTED);
-            case EGRESS_REQUESTED -> List.of(BatchState.NPIS_SELECTED, BatchState.EGRESS_REQUESTED);
-            case EGRESS_COMPLETED -> List.of(
-                    BatchState.NPIS_SELECTED, BatchState.EGRESS_REQUESTED, BatchState.EGRESS_COMPLETED);
+            case EGRESS_REQUESTED -> List.of(BatchState.EGRESS_REQUESTED);
+            case EGRESS_COMPLETED -> List.of(BatchState.EGRESS_REQUESTED, BatchState.EGRESS_COMPLETED);
             default -> throw new IllegalArgumentException(target.name());
         };
     }
@@ -75,10 +69,9 @@ public class ReconcilerJobIT {
     @Test
     void staleRowsGetTheJobTheirStateNamesAndEgressRequestedGetsNothing() {
         ExportBatch scheduled = staleIn("recon-scheduled", BatchState.SCHEDULED);
-        ExportBatch selected = staleIn("recon-selected", BatchState.NPIS_SELECTED);
         ExportBatch requested = staleIn("recon-requested", BatchState.EGRESS_REQUESTED);
         ExportBatch completed = staleIn("recon-completed", BatchState.EGRESS_COMPLETED);
-        ExportBatch fresh = ExportBatch.scheduled("recon-fresh", "candor", PERIOD, 1, CRITERIA, Instant.now());
+        ExportBatch fresh = ExportBatch.scheduled("recon-fresh", "candor", PERIOD, 1, FILTER_ID, Instant.now());
         transactions.run(session -> {
             batches.insert(session, fresh);
             return null;
@@ -88,9 +81,8 @@ public class ReconcilerJobIT {
                 .filter(entry -> entry.exportBatchId().startsWith("recon-"))
                 .collect(Collectors.toMap(ReconcilerJob.Reenqueued::exportBatchId, Function.identity()));
 
-        Assertions.assertEquals(SelectJob.NAME, byBatch.get(scheduled.id()).job());
         Assertions.assertEquals(
-                RequestEgressJob.NAME, byBatch.get(selected.id()).job());
+                RequestEgressJob.NAME, byBatch.get(scheduled.id()).job());
         Assertions.assertEquals(FinishJob.NAME, byBatch.get(completed.id()).job());
         Assertions.assertFalse(byBatch.containsKey(requested.id()), "EGRESS_REQUESTED belongs to the deadline check");
         Assertions.assertFalse(byBatch.containsKey(fresh.id()), "a fresh row is not stale");

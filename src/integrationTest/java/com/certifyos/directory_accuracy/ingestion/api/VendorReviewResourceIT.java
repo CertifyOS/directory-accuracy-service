@@ -11,7 +11,6 @@ import com.certifyos.directory_accuracy.auth.WireMockDal;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.http.Problem;
 import com.certifyos.directory_accuracy.ingestion.InboundFixtures;
@@ -584,14 +583,7 @@ class VendorReviewResourceIT {
 
     ExportBatch deliveredBatch(String tenant, String vendor) {
         ExportBatch egressed = EgressFixtures.batchIn(
-                transactions,
-                batches,
-                new ExportNpiRepository(collections),
-                tenant,
-                vendor,
-                BatchState.EGRESS_COMPLETED,
-                1,
-                InboundFixtures.DELIVERED_AT);
+                transactions, batches, tenant, vendor, BatchState.EGRESS_COMPLETED, 1, InboundFixtures.DELIVERED_AT);
         transactions.run(session -> batches.transition(
                 session,
                 egressed.id(),

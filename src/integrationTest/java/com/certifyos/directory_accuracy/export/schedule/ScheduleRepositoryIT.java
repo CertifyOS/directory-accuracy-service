@@ -2,8 +2,6 @@ package com.certifyos.directory_accuracy.export.schedule;
 
 import com.certifyos.directory_accuracy.ApiTestProfile;
 import com.certifyos.directory_accuracy.MongoResource;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Clause;
-import com.certifyos.directory_accuracy.export.schedule.SelectionCriteria.Operator;
 import com.certifyos.directory_accuracy.persistence.AlreadyExistsException;
 import com.certifyos.directory_accuracy.persistence.Transactions;
 import io.quarkus.test.common.QuarkusTestResource;
@@ -22,8 +20,7 @@ import org.junit.jupiter.api.Test;
 public class ScheduleRepositoryIT {
 
     static final Instant NOW = Instant.parse("2026-10-01T06:00:00Z");
-    static final SelectionCriteria CRITERIA =
-            new SelectionCriteria(List.of(new Clause("data.delegationStatus", Operator.IN, List.of("Direct"))));
+    static final String FILTER_ID = "flt-direct";
 
     @Inject
     ScheduleRepository schedules;
@@ -37,7 +34,7 @@ public class ScheduleRepositoryIT {
                 "candor",
                 Cadence.monthly(1),
                 ZoneId.of("UTC"),
-                CRITERIA,
+                FILTER_ID,
                 "tpl-" + tenantId,
                 nextDueAt,
                 "user:ops",
@@ -51,7 +48,7 @@ public class ScheduleRepositoryIT {
                         false,
                         created.cadence(),
                         created.timezone(),
-                        created.selection(),
+                        created.filterId(),
                         created.egressTemplateId(),
                         created.nextDueAt(),
                         null,
@@ -92,7 +89,7 @@ public class ScheduleRepositoryIT {
 
     private static Schedule insertCandidate(String tenantId) {
         return Schedule.create(
-                tenantId, "candor", Cadence.monthly(1), ZoneId.of("UTC"), CRITERIA, "tpl", NOW, "user:ops", NOW);
+                tenantId, "candor", Cadence.monthly(1), ZoneId.of("UTC"), FILTER_ID, "tpl", NOW, "user:ops", NOW);
     }
 
     @Test

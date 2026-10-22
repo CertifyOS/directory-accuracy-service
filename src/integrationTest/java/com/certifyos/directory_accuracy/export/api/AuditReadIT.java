@@ -11,7 +11,6 @@ import com.certifyos.directory_accuracy.auth.WireMockDal;
 import com.certifyos.directory_accuracy.export.batch.BatchState;
 import com.certifyos.directory_accuracy.export.batch.ExportBatch;
 import com.certifyos.directory_accuracy.export.batch.ExportBatchRepository;
-import com.certifyos.directory_accuracy.export.batch.ExportNpiRepository;
 import com.certifyos.directory_accuracy.export.jobs.EgressFixtures;
 import com.certifyos.directory_accuracy.export.schedule.Cadence;
 import com.certifyos.directory_accuracy.export.schedule.Schedule;
@@ -49,9 +48,6 @@ class AuditReadIT {
     ExportBatchRepository batches;
 
     @Inject
-    ExportNpiRepository npis;
-
-    @Inject
     ScheduleRepository schedules;
 
     @Inject
@@ -80,7 +76,6 @@ class AuditReadIT {
         ExportBatch batch = EgressFixtures.batchIn(
                 transactions,
                 batches,
-                npis,
                 TENANT,
                 "trail",
                 BatchState.EGRESS_REQUESTED,
@@ -99,19 +94,20 @@ class AuditReadIT {
                 .detail("nextDueAt", same)
                 .detail("scheduleVersion", 1L)
                 .build());
-        audit.write(AuditEvent.forBatch(AuditEventType.NPIS_REGISTERED, TENANT, "trail", batch.id(), 1)
+        audit.write(AuditEvent.forBatch(AuditEventType.EXPORT_EGRESS_REQUESTED, TENANT, "trail", batch.id(), 1)
                 .occurredAt(same)
-                .detail("page", 0)
-                .detail("count", 1)
-                .detail("firstNpi", "1234567893")
-                .detail("lastNpi", "1234567893")
+                .detail("egressCorrelationId", batch.id() + "-r1")
+                .detail("templateId", "tpl-1")
+                .detail("filterId", "flt-direct")
+                .detail("reuseSelectionFrom", null)
+                .detail("egressResponse", "202")
+                .detail("deadlineAt", same.plusSeconds(21600))
                 .build());
-        audit.write(AuditEvent.forBatch(AuditEventType.EXPORT_SELECTION_COMPLETED, TENANT, "trail", batch.id(), 1)
+        audit.write(AuditEvent.forBatch(AuditEventType.EXPORT_RECONCILED, TENANT, "trail", batch.id(), 1)
                 .occurredAt(same)
-                .detail("criteria", "c")
-                .detail("pages", 1)
-                .detail("practitionersSelected", 1)
-                .detail("durationMs", 5)
+                .detail("selected", 1L)
+                .detail("inFile", 1L)
+                .detail("match", true)
                 .build());
 
         member().get("/v1/vendor-exports/" + batch.id() + "/events")
@@ -120,7 +116,7 @@ class AuditReadIT {
                 .body("items.size()", Matchers.equalTo(3))
                 .body(
                         "items.type",
-                        Matchers.contains("EXPORT_BATCH_SCHEDULED", "NPIS_REGISTERED", "EXPORT_SELECTION_COMPLETED"))
+                        Matchers.contains("EXPORT_BATCH_SCHEDULED", "EXPORT_EGRESS_REQUESTED", "EXPORT_RECONCILED"))
                 .body("items[0].id", Matchers.startsWith("ev-"))
                 .body("items[0].tenantId", Matchers.equalTo(TENANT))
                 .body("items[0].vendor", Matchers.equalTo("trail"))
@@ -132,7 +128,7 @@ class AuditReadIT {
                 .body("items[0].detail.trigger", Matchers.equalTo("MANUAL"))
                 .body("items[1].actor", Matchers.equalTo("system:vendor-export"))
                 .body("items[1].jobId", Matchers.nullValue())
-                .body("items[2].detail.practitionersSelected", Matchers.equalTo(1));
+                .body("items[2].detail.selected", Matchers.equalTo(1));
     }
 
     @Test
@@ -140,14 +136,7 @@ class AuditReadIT {
     @JwtSecurity(claims = {@Claim(key = EMAIL, value = "auditread@certifyos.com")})
     void anotherTenantsBatchTrailIsNotFound() {
         ExportBatch theirs = EgressFixtures.batchIn(
-                transactions,
-                batches,
-                npis,
-                "org-audit-other",
-                "candor",
-                BatchState.EGRESS_REQUESTED,
-                1,
-                Instant.now());
+                transactions, batches, "org-audit-other", "candor", BatchState.EGRESS_REQUESTED, 1, Instant.now());
         member().get("/v1/vendor-exports/" + theirs.id() + "/events")
                 .then()
                 .statusCode(404)
@@ -164,7 +153,7 @@ class AuditReadIT {
                 "sched",
                 Cadence.monthly(1),
                 ZoneId.of("UTC"),
-                EgressFixtures.CRITERIA,
+                EgressFixtures.FILTER_ID,
                 "tpl-1",
                 Instant.now().plusSeconds(86400),
                 "auditread@certifyos.com",
@@ -178,7 +167,7 @@ class AuditReadIT {
                 .occurredAt(Instant.parse("2026-10-01T06:00:00Z"))
                 .detail("cadence", "monthly")
                 .detail("timezone", "UTC")
-                .detail("selection", "s")
+                .detail("filterId", "flt-1")
                 .detail("egressTemplateId", "tpl-1")
                 .detail("nextDueAt", "n")
                 .build());
@@ -191,7 +180,9 @@ class AuditReadIT {
         audit.write(AuditEvent.forBatch(
                         AuditEventType.EXPORT_BATCH_EMPTY, TENANT, "sched", TENANT + "-sched-2026-10-001", 1)
                 .occurredAt(Instant.parse("2026-10-01T06:06:00Z"))
-                .detail("criteria", "c")
+                .detail("filterId", "flt-1")
+                .detail("failureReason", "NO_MATCHING_PRACTITIONERS")
+                .detail("completionSource", "EVENT")
                 .build());
 
         member().get("/v1/vendor-exports/schedules/" + TENANT + "/sched/events")

@@ -25,9 +25,9 @@ import org.jboss.logging.Logger;
 
 /**
  * The schedule writes from the design's Contracts step 0, each one transaction with its audit
- * event: create or replace, disable, enable with catch-up, and preview against api-layer.
- * Validation order on {@code PUT}: tenant id, schema, timezone and cadence, then the template,
- * then the write.
+ * event: create or replace, disable, enable with catch-up, run now. Validation order on
+ * {@code PUT}: tenant id, saved filter id form, timezone and cadence, then the template, then the
+ * write. The filter id is stored as given; this service never reads the filter.
  */
 @ApplicationScoped
 public class ScheduleService {
@@ -44,7 +44,6 @@ public class ScheduleService {
     private final Transactions transactions;
     private final TemplateProvisioner templates;
     private final BatchLifecycle lifecycle;
-    private final SelectionPreview preview;
     private final Clock clock;
 
     public ScheduleService(
@@ -53,14 +52,12 @@ public class ScheduleService {
             Transactions transactions,
             TemplateProvisioner templates,
             BatchLifecycle lifecycle,
-            SelectionPreview preview,
             Clock clock) {
         this.schedules = schedules;
         this.audit = audit;
         this.transactions = transactions;
         this.templates = templates;
         this.lifecycle = lifecycle;
-        this.preview = preview;
         this.clock = clock;
     }
 
@@ -78,7 +75,7 @@ public class ScheduleService {
      */
     public Written put(String tenantId, String vendor, PutRequest request, String actor) {
         String scheduleId = Ids.scheduleId(tenantId, vendor);
-        SelectionCriteria selection = ScheduleRequests.toCriteria(request.selection());
+        String filterId = ScheduleRequests.toFilterId(request.filterId());
         ZoneId zone = ScheduleRequests.toZone(request.timezone());
         if (request.cadence() == null) {
             throw ProblemException.badRequest("CADENCE_INVALID", "cadence is required");
@@ -90,25 +87,25 @@ public class ScheduleService {
                 throw ProblemException.conflict(
                         "SCHEDULE_EXISTS", "schedule " + scheduleId + " exists; send its version to replace it");
             }
-            return create(tenantId, vendor, request, selection, zone, cadence, actor);
+            return create(tenantId, vendor, request, filterId, zone, cadence, actor);
         }
         Schedule current = existing.orElseThrow(
                 () -> ProblemException.notFound("SCHEDULE_NOT_FOUND", "no schedule " + scheduleId));
-        return replace(current, request, selection, zone, cadence, actor);
+        return replace(current, request, filterId, zone, cadence, actor);
     }
 
     private Written create(
             String tenantId,
             String vendor,
             PutRequest request,
-            SelectionCriteria selection,
+            String filterId,
             ZoneId zone,
             Cadence cadence,
             String actor) {
         TemplateProvisioner.Provisioned template = templates.provision(tenantId, request.templateOverride());
         Instant now = clock.instant();
         Schedule schedule = Schedule.create(
-                tenantId, vendor, cadence, zone, selection, template.templateId(), cadence.next(now, zone), actor, now);
+                tenantId, vendor, cadence, zone, filterId, template.templateId(), cadence.next(now, zone), actor, now);
         try {
             transactions.run(session -> {
                 schedules.insert(session, schedule);
@@ -119,7 +116,7 @@ public class ScheduleService {
                                 .occurredAt(now)
                                 .detail("cadence", cadence.toDocument())
                                 .detail("timezone", zone.getId())
-                                .detail("selection", selection.toDocuments())
+                                .detail("filterId", filterId)
                                 .detail("egressTemplateId", template.templateId())
                                 .detail("templateCreated", template.created())
                                 .detail("nextDueAt", schedule.nextDueAt())
@@ -134,12 +131,7 @@ public class ScheduleService {
     }
 
     private Written replace(
-            Schedule current,
-            PutRequest request,
-            SelectionCriteria selection,
-            ZoneId zone,
-            Cadence cadence,
-            String actor) {
+            Schedule current, PutRequest request, String filterId, ZoneId zone, Cadence cadence, String actor) {
         if (request.version() != current.version()) {
             throw ProblemException.conflict(
                     "VERSION_STALE",
@@ -153,11 +145,11 @@ public class ScheduleService {
         Instant now = clock.instant();
         boolean whenChanged = !cadence.equals(current.cadence()) || !zone.equals(current.timezone());
         Instant nextDueAt = whenChanged ? cadence.next(now, zone) : current.nextDueAt();
-        List<Map<String, Object>> changes = changes(current, cadence, zone, selection, templateId);
+        List<Map<String, Object>> changes = changes(current, cadence, zone, filterId, templateId);
         Bson update = Updates.combine(
                 Updates.set("cadence", cadence.toDocument()),
                 Updates.set("timezone", zone.getId()),
-                Updates.set("selection", selection.toDocuments()),
+                Updates.set("filterId", filterId),
                 Updates.set("egressTemplateId", templateId),
                 Updates.set("nextDueAt", nextDueAt),
                 Updates.set("updatedBy", actor),
@@ -176,7 +168,7 @@ public class ScheduleService {
     }
 
     private static List<Map<String, Object>> changes(
-            Schedule current, Cadence cadence, ZoneId zone, SelectionCriteria selection, String templateId) {
+            Schedule current, Cadence cadence, ZoneId zone, String filterId, String templateId) {
         List<Map<String, Object>> changes = new ArrayList<>();
         if (!cadence.equals(current.cadence())) {
             changes.add(change("cadence", current.cadence().toDocument(), cadence.toDocument()));
@@ -184,8 +176,8 @@ public class ScheduleService {
         if (!zone.equals(current.timezone())) {
             changes.add(change("timezone", current.timezone().getId(), zone.getId()));
         }
-        if (!selection.equals(current.selection())) {
-            changes.add(change("selection", current.selection().toDocuments(), selection.toDocuments()));
+        if (!filterId.equals(current.filterId())) {
+            changes.add(change("filterId", current.filterId(), filterId));
         }
         if (!templateId.equals(current.egressTemplateId())) {
             changes.add(change("egressTemplateId", current.egressTemplateId(), templateId));
@@ -275,12 +267,12 @@ public class ScheduleService {
     /**
      * Creates the current period's batch now, as the tick would: insert, advance {@code nextDueAt},
      * {@code EXPORT_BATCH_SCHEDULED} with {@code trigger = MANUAL} and {@code SCHEDULE_RUN_NOW} in
-     * one transaction, then the select job. How a pilot's first export is started.
+     * one transaction, then the egress request job. How a pilot's first export is started.
      *
      * @param tenantId the tenant
      * @param vendor the vendor
      * @param actor the operator
-     * @return the batch, its select job and the schedule's new due instant
+     * @return the batch, its egress request job and the schedule's new due instant
      */
     public BatchLifecycle.Scheduled runNow(String tenantId, String vendor, String actor) {
         Schedule schedule = require(tenantId, vendor);
@@ -305,21 +297,6 @@ public class ScheduleService {
         } catch (StaleScheduleException changed) {
             throw ProblemException.conflict("VERSION_STALE", changed.getMessage());
         }
-    }
-
-    /**
-     * How many practitioners a selection matches today, through api-layer with page size 1.
-     *
-     * @param tenantId the tenant
-     * @param vendor the vendor, for the stored selection
-     * @param selection the selection to test, or null for the stored one
-     * @return the count
-     */
-    public long preview(String tenantId, String vendor, Map<String, ScheduleRequests.ClauseRequest> selection) {
-        SelectionCriteria criteria = selection == null || selection.isEmpty()
-                ? require(tenantId, vendor).selection()
-                : ScheduleRequests.toCriteria(selection);
-        return preview.count(tenantId, criteria);
     }
 
     /** One schedule, or 404. */

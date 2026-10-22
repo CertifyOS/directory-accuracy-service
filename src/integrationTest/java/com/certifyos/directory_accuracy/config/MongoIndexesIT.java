@@ -69,16 +69,6 @@ public class MongoIndexesIT {
     }
 
     @Test
-    void npiIndexes() {
-        Map<String, Document> found = byName(collections.npis());
-        Assertions.assertEquals(
-                new Document("exportBatchId", 1), found.get("npis_batch").get("key"));
-        Assertions.assertEquals(
-                new Document("tenantId", 1).append("npi", 1),
-                found.get("npis_tenant_npi").get("key"));
-    }
-
-    @Test
     void eventIndexes() {
         Map<String, Document> found = byName(collections.events());
         Assertions.assertEquals(

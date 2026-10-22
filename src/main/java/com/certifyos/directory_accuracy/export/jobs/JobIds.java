@@ -15,7 +15,7 @@ public final class JobIds {
     /**
      * The id of a batch job for one attempt.
      *
-     * @param job the job name, for example {@code select}
+     * @param job the job name, for example {@code finish}
      * @param exportBatchId the batch
      * @param attempt the attempt the job belongs to
      * @return a stable UUID
@@ -34,5 +34,17 @@ public final class JobIds {
      */
     public static UUID deadline(String exportBatchId, int attempt, int check) {
         return of("deadline-" + check, exportBatchId, attempt);
+    }
+
+    /**
+     * The id of an egress request scheduled after a selection-quota refusal, one per wait.
+     *
+     * @param exportBatchId the batch
+     * @param attempt the attempt
+     * @param wait the wait number, from 1
+     * @return a stable UUID
+     */
+    public static UUID quotaWait(String exportBatchId, int attempt, int wait) {
+        return of(RequestEgressJob.NAME + "-quota-" + wait, exportBatchId, attempt);
     }
 }

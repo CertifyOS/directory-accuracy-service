@@ -10,7 +10,6 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.WebApplicationException;
-import java.util.List;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +47,7 @@ class EgressClientIT {
                 ",",
                 "csv",
                 "[\"locations\"]",
-                List.of("1234567893"),
+                EgressExportRequest.Selection.savedFilter("flt-direct"),
                 EgressClient.INITIATOR,
                 new EgressExportRequest.Destination("test-vendor-bucket", "from/org-a/f.csv"));
     }
@@ -75,7 +74,8 @@ class EgressClientIT {
                         .withHeader("Content-Type", WireMock.containing("application/json"))
                         .withRequestBody(WireMock.matchingJsonPath(
                                 "$.destination.bucket", WireMock.equalTo("test-vendor-bucket")))
-                        .withRequestBody(WireMock.matchingJsonPath("$.npiFilter[0]", WireMock.equalTo("1234567893"))));
+                        .withRequestBody(
+                                WireMock.matchingJsonPath("$.selection.filterId", WireMock.equalTo("flt-direct"))));
     }
 
     @Test

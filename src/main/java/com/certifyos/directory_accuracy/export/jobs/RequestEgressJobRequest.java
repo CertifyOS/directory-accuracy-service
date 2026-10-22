@@ -5,8 +5,10 @@ package com.certifyos.directory_accuracy.export.jobs;
  *
  * @param exportBatchId the batch
  * @param attempt the attempt
+ * @param quotaWait 0 for the first request; the wait number when scheduled after egress's
+ *     selection quota refused an earlier one
  */
-public record RequestEgressJobRequest(String exportBatchId, int attempt) implements BatchJobRequest {
+public record RequestEgressJobRequest(String exportBatchId, int attempt, int quotaWait) implements BatchJobRequest {
 
     @Override
     public Class<RequestEgressJob> getJobRequestHandler() {
@@ -15,6 +17,8 @@ public record RequestEgressJobRequest(String exportBatchId, int attempt) impleme
 
     @Override
     public String toString() {
-        return exportBatchId + " attempt " + attempt;
+        return quotaWait == 0
+                ? exportBatchId + " attempt " + attempt
+                : exportBatchId + " attempt " + attempt + " quota wait " + quotaWait;
     }
 }
